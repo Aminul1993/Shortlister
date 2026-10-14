@@ -21,7 +21,7 @@ from .jobs import MODES, JobManager, bid_label
 log = logging.getLogger(__name__)
 
 
-def create_app(settings: Settings | None = None, *, top: int = 10) -> Flask:
+def create_app(settings: Settings | None = None) -> Flask:
     settings = settings or Settings.load()
     app = Flask(__name__)
     app.config["SECRET_KEY"] = os.getenv("FDM_PORTAL_SECRET") or secrets.token_hex(32)
@@ -72,7 +72,7 @@ def create_app(settings: Settings | None = None, *, top: int = 10) -> Flask:
         if not gigs:
             flash("No gigs were fetched. Check your network connection and FDM_* settings.", "error")
             return redirect(url_for("index"))
-        ranked = rank_gigs(gigs)[:top]
+        ranked = rank_gigs(gigs)[:settings.shortlist_size]
         save_shortlist(ranked, settings.output_dir)
         flash(f"Scanned {len(gigs)} gigs and refreshed the top {len(ranked)}.", "ok")
         return redirect(url_for("index"))

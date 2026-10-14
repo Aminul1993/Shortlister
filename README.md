@@ -33,16 +33,25 @@ cp .env.example .env              # then fill in the key
 | `FDM_RSS_FEEDS` | Optional comma-separated RSS/Atom gig feeds to scan in addition to Freelancer.com |
 | `FDM_FREELANCER_NAME` | Optional name to sign proposals with |
 | `FDM_FREELANCER_PROFILE` | Optional true facts about you (skills, past work) that proposals may mention. The Pitch Writer never invents experience, so without this it argues from the demo and the delivery plan alone |
+| `FDM_HOST` / `FDM_PORT` | Where the portal listens. Default `127.0.0.1` and `5000` |
+| `FDM_SHORTLIST_SIZE` | How many gigs a refresh keeps. Default `10` |
+| `FDM_LOG_LEVEL` | `DEBUG`, `INFO` (default), `WARNING` or `ERROR` |
 
 Other `FDM_*` settings are listed in [.env.example](.env.example).
 
 ## Usage
 
-Everything happens in a local web portal:
+Everything happens in a local web portal. Start the server from the project folder:
 
 ```bash
-python -m fdm                      # http://127.0.0.1:5000  (--port, --host, --top, -v)
+python app.py                      # http://127.0.0.1:5000
 ```
+
+There are no command-line options: everything is configured in `.env` or environment variables.
+`app.py` reads `.env` and writes `output/` in its own folder, wherever you start it from.
+The portal runs on [Waitress](https://docs.pylonsproject.org/projects/waitress/), a production WSGI
+server that works on Windows, macOS and Linux. Run it as a single process, because jobs and their
+progress live in that process's memory. Stop it with Ctrl+C.
 
 1. **Shortlist** lists the saved top 10 from `output/top10.json` with scores, budgets, ranking
    signals and a link to each gig. **Refresh shortlist** searches again, which takes about 15 seconds.

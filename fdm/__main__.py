@@ -1,3 +1,3 @@
-from .cli import main
+from .server import main
 
 raise SystemExit(main())

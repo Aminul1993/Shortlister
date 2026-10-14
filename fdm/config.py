@@ -49,6 +49,11 @@ class Settings:
     # Facts the Pitch Writer may use about you. It never invents experience, so leaving these empty is safe.
     freelancer_name: str = ""
     freelancer_profile: str = ""
+    # The portal server. It has no login, so keep it bound to localhost unless something else guards it.
+    host: str = "127.0.0.1"
+    port: int = 5000
+    shortlist_size: int = 10
+    log_level: str = "INFO"
 
     @classmethod
     def load(cls, env_file: str | os.PathLike[str] = ".env") -> Settings:
@@ -65,4 +70,8 @@ class Settings:
             max_repairs=_int("FDM_MAX_REPAIRS", 2),
             freelancer_name=os.getenv("FDM_FREELANCER_NAME", "").strip(),
             freelancer_profile=os.getenv("FDM_FREELANCER_PROFILE", "").strip(),
+            host=os.getenv("FDM_HOST", "").strip() or "127.0.0.1",
+            port=_int("FDM_PORT", 5000),
+            shortlist_size=_int("FDM_SHORTLIST_SIZE", 10),
+            log_level=os.getenv("FDM_LOG_LEVEL", "").strip().upper() or "INFO",
         )
