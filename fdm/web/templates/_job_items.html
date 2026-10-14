@@ -1,0 +1,43 @@
+<div class="job-summary" data-finished="{{ 'true' if job.finished else 'false' }}">
+  <span class="pill pill-{{ job.state }}">{{ job.state }}</span>
+  <span>{{ job.done_count }} of {{ job.items|length }} finished{% if job.failed_count %} · {{ job.failed_count }} failed{% endif %}</span>
+  {% if not job.finished %}<span class="spinner" aria-hidden="true"></span>{% endif %}
+</div>
+{% if job.error %}<div class="flash flash-error">{{ job.error }}</div>{% endif %}
+
+<ol class="projects">
+  {% for item in job.items %}
+  <li class="project">
+    <div class="project-head">
+      <span class="gig-rank">{{ item.rank }}</span>
+      <div class="project-title">
+        <a href="{{ item.gig_url }}" target="_blank" rel="noopener noreferrer">{{ item.title }}</a>
+        <span class="muted">{{ item.platform }} · score {{ '%.1f'|format(item.score) }}</span>
+      </div>
+      <span class="pill pill-{{ item.state }}">{{ item.state }}</span>
+    </div>
+    <dl class="project-facts">
+      {% if item.live_url %}
+      <div><dt>Live URL</dt><dd><a href="{{ item.live_url }}" target="_blank" rel="noopener noreferrer">{{ item.live_url }}</a></dd></div>
+      {% endif %}
+      {% if item.used_fallback %}
+      <div><dt>Built by</dt><dd>Fallback app (agent output failed validation)</dd></div>
+      {% elif item.model %}
+      <div><dt>Built by</dt><dd>{{ item.model }}</dd></div>
+      {% endif %}
+      {% if item.path %}
+      <div><dt>Folder</dt><dd><code>{{ item.path }}</code></dd></div>
+      {% endif %}
+      {% if item.error %}
+      <div><dt>Error</dt><dd class="error-text">{{ item.error }}</dd></div>
+      {% endif %}
+    </dl>
+    {% if item.notes %}
+    <details>
+      <summary>Build notes ({{ item.notes|length }})</summary>
+      <ul>{% for note in item.notes %}<li>{{ note }}</li>{% endfor %}</ul>
+    </details>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ol>

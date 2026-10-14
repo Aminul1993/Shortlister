@@ -1,0 +1,9 @@
+[project]
+name = "freelance-demo-machine"
+version = "0.1.0"
+description = "Find easy freelance web gigs, generate FastAPI + Jinja2 demos with Ollama Cloud agents, deploy them to Vercel."
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>Shortlist</h1>
+    <p class="muted">
+      {% if rows %}Top {{ rows|length }} easiest gigs{% if updated %} · updated {{ updated.strftime('%d %b %Y, %H:%M') }}{% endif %}
+      {% else %}No shortlist yet.{% endif %}
+    </p>
+  </div>
+  <form method="post" action="{{ url_for('refresh') }}" data-busy-label="Searching gigs…">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <button class="btn btn-secondary" type="submit">Refresh shortlist</button>
+  </form>
+</section>
+
+{% if not can_generate %}
+<div class="flash flash-warn">Set <code>OLLAMA_API_KEY</code> in <code>.env</code> and restart the portal to create projects.</div>
+{% endif %}
+
+{% if rows %}
+<form method="post" action="{{ url_for('create_job') }}" id="create-form" data-busy-label="Starting…">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  <div class="list-head">
+    <label class="check"><input type="checkbox" id="select-all"> Select all</label>
+    <span>Suitability</span>
+  </div>
+
+  <ol class="gigs">
+    {% for row in rows %}
+    {% set gig = row.item.gig %}
+    <li>
+      <label class="gig">
+        <input type="checkbox" name="gig" value="{{ row.key }}" class="gig-check" aria-label="Select {{ gig.title }}">
+        <span class="gig-rank">{{ row.rank }}</span>
+        <span class="gig-body">
+          <span class="gig-title">{{ gig.title }}</span>
+          <span class="gig-meta">
+            {{ gig.platform }}
+            {% if gig.budget_max_usd %} · up to ${{ '{:,.0f}'.format(gig.budget_max_usd) }}{% endif %}
+            {% if gig.pay_type and gig.pay_type != 'unknown' %} · {{ gig.pay_type }}{% endif %}
+            · <a href="{{ gig.url }}" target="_blank" rel="noopener noreferrer">View gig ↗</a>
+            {% if row.built %}<span class="tag">already built</span>{% endif %}
+          </span>
+          <span class="gig-brief">{{ gig.description }}</span>
+          {% if row.item.signals %}
+          <span class="chips">
+            {% for signal in row.item.signals[:8] %}
+            <span class="chip {{ 'chip-plus' if signal.startswith('+') else 'chip-minus' }}">{{ signal }}</span>
+            {% endfor %}
+          </span>
+          {% endif %}
+        </span>
+        <span class="gig-score" title="Suitability score out of 10">
+          <strong>{{ '%.1f'|format(row.item.score) }}</strong>
+          <span class="bar"><span style="width: {{ (row.item.score * 10)|round|int }}%"></span></span>
+        </span>
+      </label>
+    </li>
+    {% endfor %}
+  </ol>
+
+  <div class="actionbar">
+    <span id="selected-count">0 selected</span>
+    <label class="check"><input type="checkbox" name="smoke" checked> Smoke-test apps</label>
+    <label class="check{% if not can_deploy %} disabled{% endif %}"
+           {% if not can_deploy %}title="Set VERCEL_TOKEN in .env and restart the portal to enable"{% endif %}>
+      <input type="checkbox" name="deploy" {% if can_deploy %}checked{% else %}disabled{% endif %}> Deploy to Vercel
+    </label>
+    <button class="btn btn-primary" type="submit" id="create-btn" disabled
+            {% if not can_generate %}data-locked="1"{% endif %}>Create projects</button>
+  </div>
+</form>
+{% else %}
+<div class="empty">
+  <p><strong>Nothing shortlisted yet.</strong></p>
+  <p>Use <em>Refresh shortlist</em> to search Freelancer.com and rank the ten easiest gigs.
+     It takes about 15 seconds.</p>
+</div>
+{% endif %}
+
+{% if jobs %}
+<section class="jobs">
+  <h2>Recent jobs</h2>
+  <ul>
+    {% for job in jobs %}
+    <li>
+      <a href="{{ url_for('job_detail', job_id=job.id) }}">{{ job.created_at.strftime('%H:%M:%S') }} · {{ job.items|length }} project{{ 's' if job.items|length != 1 }}</a>
+      <span class="pill pill-{{ job.state }}">{{ job.state }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% endblock %}

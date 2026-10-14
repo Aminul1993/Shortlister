@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Job {{ job.id }}{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <p class="crumb"><a href="{{ url_for('index') }}">← Shortlist</a></p>
+    <h1>Job {{ job.id }}</h1>
+    <p class="muted">
+      Started {{ job.created_at.strftime('%d %b %Y, %H:%M:%S') }}
+      · {{ 'generate and deploy' if job.deploy else 'generate only' }}{% if not job.smoke %} · smoke tests off{% endif %}
+    </p>
+  </div>
+</section>
+
+<div id="job-items" data-src="{{ url_for('job_items', job_id=job.id) }}" aria-live="polite">
+  {% include "_job_items.html" %}
+</div>
+{% endblock %}
