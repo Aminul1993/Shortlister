@@ -1,10 +1,10 @@
-"""Background jobs for the portal: screenshot a generated demo page and write a proposal for each selected gig.
+"""Background jobs for the portal: for each selected gig, make a new screenshot, a new proposal, or both.
 
-Jobs run one at a time on a single daemon worker thread, so two jobs never write the same
-screenshot or compete for Ollama rate limits. Each gig inside a job is processed concurrently
-and its status is updated as it moves through the pipeline:
+Jobs run one at a time on a single daemon worker thread, so two jobs never claim the same version
+number or compete for Ollama rate limits. Each gig inside a job is processed concurrently and its
+status is updated as it moves through the pipeline:
 
-    queued -> generating -> captured
+    queued -> generating -> done
                         \\-> failed
 """
 
@@ -16,16 +16,21 @@ import logging
 import queue
 import threading
 import uuid
+from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from datetime import datetime
 
 from ..config import Settings
-from ..generator import generate_screenshot
+from ..generator import generate_demo, generate_proposal, generate_screenshot
 from ..llm import OllamaCloud
-from ..models import Pitch, ScoredGig
+from ..models import ScoredGig
+from ..pages import make_demo_id
 from ..screenshot import Renderer
 
 log = logging.getLogger(__name__)
+
+# What a job makes for each selected gig. Every run adds new versions; nothing is overwritten.
+MODES = {"both": "Screenshots & proposals", "screenshot": "Screenshots only", "proposal": "Proposals only"}
 
 
 @dataclass
@@ -35,9 +40,13 @@ class ItemStatus:
     platform: str
     gig_url: str
     score: float
+    demo_id: str
     state: str = "queued"
-    screenshot: str | None = None  # file name inside output/screenshots/
+    # File name inside output/screenshots/. Proposal-only jobs show the existing screenshot the proposal describes,
+    # or none if the proposal was written without one.
+    screenshot: str | None = None
     path: str | None = None
+    screenshot_version: int | None = None
     model: str | None = None
     used_fallback: bool = False
     error: str | None = None
@@ -45,14 +54,15 @@ class ItemStatus:
     proposal: str | None = None  # the message to send the client
     proposal_file: str | None = None  # file name inside output/proposals/
     proposal_path: str | None = None
+    proposal_version: int | None = None
     bid: str | None = None  # e.g. "~$120" or "~$15/hr"
     delivery_days: int | None = None
 
 
-def _bid_label(pitch: Pitch | None, pay_type: str) -> str | None:
-    if pitch is None or pitch.bid_usd is None:
+def bid_label(bid_usd: float | None, pay_type: str | None) -> str | None:
+    if bid_usd is None:
         return None
-    return f"~${pitch.bid_usd:,.0f}{'/hr' if pay_type == 'hourly' else ''}"
+    return f"~${bid_usd:,.0f}{'/hr' if pay_type == 'hourly' else ''}"
 
 
 @dataclass
@@ -60,8 +70,13 @@ class Job:
     id: str
     created_at: datetime
     items: list[ItemStatus]
+    mode: str = "both"  # a key of MODES
     state: str = "queued"  # queued -> running -> done | failed
     error: str | None = None
+
+    @property
+    def mode_label(self) -> str:
+        return MODES[self.mode]
 
     @property
     def finished(self) -> bool:
@@ -69,7 +84,7 @@ class Job:
 
     @property
     def done_count(self) -> int:
-        return sum(item.state in {"captured", "failed"} for item in self.items)
+        return sum(item.state in {"done", "failed"} for item in self.items)
 
     @property
     def failed_count(self) -> int:
@@ -84,9 +99,12 @@ class JobManager:
         self._queue: queue.Queue[tuple[Job, list[ScoredGig]]] = queue.Queue()
         threading.Thread(target=self._work, name="fdm-jobs", daemon=True).start()
 
-    def submit(self, chosen: list[tuple[int, ScoredGig]]) -> str:
-        items = [ItemStatus(rank, s.gig.title, s.gig.platform, s.gig.url, s.score) for rank, s in chosen]
-        job = Job(uuid.uuid4().hex[:8], datetime.now(), items)
+    def submit(self, chosen: list[tuple[int, ScoredGig]], mode: str = "both") -> str:
+        if mode not in MODES:
+            raise ValueError(f"unknown mode {mode!r}")
+        items = [ItemStatus(rank, s.gig.title, s.gig.platform, s.gig.url, s.score, make_demo_id(s.gig))
+                 for rank, s in chosen]
+        job = Job(uuid.uuid4().hex[:8], datetime.now(), items, mode)
         with self._lock:
             self._jobs[job.id] = job
         self._queue.put((job, [scored for _, scored in chosen]))
@@ -125,28 +143,38 @@ class JobManager:
 
     async def _run(self, job: Job, chosen: list[ScoredGig]) -> None:
         s = self.settings
-        # The browser starts first, so a missing Chromium fails the job before any LLM tokens are spent.
-        async with (
-            Renderer() as renderer,
-            OllamaCloud(s.ollama_api_key, s.ollama_models, s.ollama_base_url, concurrency=s.llm_concurrency) as llm,
-        ):
+        async with AsyncExitStack() as stack:
+            # The browser starts first, so a missing Chromium fails the job before any LLM tokens are spent.
+            # Proposal-only jobs describe screenshots that already exist and need no browser.
+            renderer = None if job.mode == "proposal" else await stack.enter_async_context(Renderer())
+            llm = await stack.enter_async_context(
+                OllamaCloud(s.ollama_api_key, s.ollama_models, s.ollama_base_url, concurrency=s.llm_concurrency))
             await asyncio.gather(*(
-                self._build(item, scored, llm, renderer) for item, scored in zip(job.items, chosen)
+                self._build(item, scored, job.mode, llm, renderer) for item, scored in zip(job.items, chosen)
             ))
 
-    async def _build(self, item: ItemStatus, scored: ScoredGig, llm: OllamaCloud, renderer: Renderer) -> None:
+    async def _build(self, item: ItemStatus, scored: ScoredGig, mode: str, llm: OllamaCloud,
+                     renderer: Renderer | None) -> None:
         self._update(item, state="generating")
         try:
-            shot = await generate_screenshot(llm, renderer, scored, self.settings)
+            if mode == "proposal":
+                shot = await generate_proposal(llm, scored, self.settings)
+            elif mode == "screenshot":
+                shot = await generate_screenshot(llm, renderer, scored, self.settings)
+            else:
+                shot = await generate_demo(llm, renderer, scored, self.settings)
         except Exception as exc:  # one broken gig must not stop the others
             log.exception("Generating '%s' failed", item.title)
             self._update(item, state="failed", error=str(exc) or type(exc).__name__)
             return
         pitch, proposal = shot.pitch, shot.proposal_path
-        self._update(item, state="captured", screenshot=shot.path.name, path=str(shot.path), model=shot.model,
+        self._update(item, state="done",
+                     screenshot=shot.path.name if shot.path else None, path=str(shot.path) if shot.path else None,
+                     screenshot_version=shot.version, model=shot.model,
                      used_fallback=shot.used_fallback, notes=list(shot.notes),
                      proposal=pitch.message if pitch else None,
                      proposal_file=proposal.name if proposal else None,
                      proposal_path=str(proposal) if proposal else None,
-                     bid=_bid_label(pitch, scored.gig.pay_type),
+                     proposal_version=shot.proposal_version,
+                     bid=bid_label(pitch.bid_usd, scored.gig.pay_type) if pitch else None,
                      delivery_days=pitch.delivery_days if pitch else None)

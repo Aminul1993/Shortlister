@@ -1,4 +1,5 @@
-"""Flask web portal: browse the shortlist, select gigs, and watch their screenshots and proposals being made."""
+"""Flask web portal: browse the shortlist, select gigs, watch their screenshots and proposals being made,
+and look back at every saved version."""
 
 from __future__ import annotations
 
@@ -10,12 +11,12 @@ import secrets
 from flask import Flask, abort, flash, redirect, render_template, request, send_from_directory, session, url_for
 
 from ..config import Settings
-from ..generator import PROPOSAL_DIR, SCREENSHOT_DIR, proposal_path, screenshot_path
 from ..pages import make_demo_id
 from ..ranking import rank_gigs
 from ..sources import fetch_gigs
 from ..store import gig_key, load_shortlist, save_shortlist, shortlist_updated_at
-from .jobs import JobManager
+from ..versions import DEMO_ID, PROPOSAL_DIR, SCREENSHOT_DIR, described_screenshot, proposals, screenshots
+from .jobs import MODES, JobManager, bid_label
 
 log = logging.getLogger(__name__)
 
@@ -47,11 +48,11 @@ def create_app(settings: Settings | None = None, *, top: int = 10) -> Flask:
         rows = []
         for rank, scored in enumerate(load_shortlist(settings.output_dir), 1):
             demo_id = make_demo_id(scored.gig)
-            shot = screenshot_path(settings.output_dir, demo_id)
-            proposal = proposal_path(settings.output_dir, demo_id)
-            rows.append({"rank": rank, "key": gig_key(scored.gig), "item": scored,
-                         "screenshot": shot.name if shot.is_file() else None,
-                         "proposal": proposal.name if proposal.is_file() else None})
+            shots = screenshots(settings.output_dir, demo_id)
+            texts = proposals(settings.output_dir, demo_id)
+            rows.append({"rank": rank, "key": gig_key(scored.gig), "item": scored, "demo_id": demo_id,
+                         "screenshot": shots[-1].number if shots else None,
+                         "proposal": texts[-1].number if texts else None})
         return render_template(
             "index.html",
             rows=rows,
@@ -81,15 +82,55 @@ def create_app(settings: Settings | None = None, *, top: int = 10) -> Flask:
         if not settings.ollama_api_key:
             flash("Set OLLAMA_API_KEY in .env and restart the portal before creating screenshots.", "error")
             return redirect(url_for("index"))
+        mode = request.form.get("mode", "both")
+        if mode not in MODES:
+            abort(400, "Unknown kind of job.")
         shortlist = {gig_key(s.gig): (rank, s) for rank, s in enumerate(load_shortlist(settings.output_dir), 1)}
-        selected = request.form.getlist("gig")
+        selected = list(dict.fromkeys(request.form.getlist("gig")))  # a gig twice would race for one version number
         chosen = [shortlist[key] for key in selected if key in shortlist]
         if not chosen:
             flash("The shortlist changed since you loaded it. Select again." if selected
                   else "Select at least one gig.", "error")
             return redirect(url_for("index"))
-        job_id = jobs.submit(chosen)
+        job_id = jobs.submit(chosen, mode)
         return redirect(url_for("job_detail", job_id=job_id))
+
+    @app.get("/demos/<demo_id>")
+    def demo(demo_id: str):
+        """Every saved screenshot and proposal of one gig, newest first, with buttons to make new ones."""
+        if not DEMO_ID.fullmatch(demo_id):
+            abort(404)
+        entry = next(((rank, s) for rank, s in enumerate(load_shortlist(settings.output_dir), 1)
+                      if make_demo_id(s.gig) == demo_id), None)
+        shots = screenshots(settings.output_dir, demo_id)
+        texts = proposals(settings.output_dir, demo_id)
+        if entry is None and not shots and not texts:
+            abort(404)
+        written = []
+        for version in texts:
+            try:
+                text = version.path.read_text(encoding="utf-8").strip()
+            except OSError:
+                continue
+            meta = version.meta
+            written.append({"version": version, "text": text, "for_screenshot": described_screenshot(version, shots),
+                            "text_only": "screenshot_version" in meta and meta["screenshot_version"] is None,
+                            "bid": bid_label(meta.get("bid_usd"), meta.get("pay_type")),
+                            "delivery_days": meta.get("delivery_days")})
+        latest_shot = shots[-1] if shots else None
+        return render_template(
+            "demo.html",
+            demo_id=demo_id,
+            rank=entry[0] if entry else None,
+            scored=entry[1] if entry else None,
+            key=gig_key(entry[1].gig) if entry else None,
+            shots=shots[::-1],
+            proposals=written[::-1],
+            latest_shot=latest_shot,
+            # A proposal describes a screenshot through the design brief saved with it; without one it mentions none.
+            shot_has_brief=bool(latest_shot and latest_shot.meta.get("blueprint")),
+            can_generate=bool(settings.ollama_api_key),
+        )
 
     @app.get("/jobs/<job_id>")
     def job_detail(job_id: str):

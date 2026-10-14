@@ -5,7 +5,7 @@ from dataclasses import replace
 import httpx
 
 from fdm.config import Settings
-from fdm.generator import generate_screenshot
+from fdm.generator import generate_demo, generate_proposal, generate_screenshot
 from fdm.llm import OllamaCloud
 from fdm.models import Gig, ScoredGig
 from fdm.screenshot import BLANK, Shot
@@ -49,7 +49,7 @@ def _settings(tmp_path) -> Settings:
 
 
 def _generate(tmp_path, developer_replies: list[str], renderer=None, pitch_reply: str = json.dumps(PITCH),
-              prompts: dict[str, str] | None = None, **settings_changes):
+              prompts: dict[str, str] | None = None, step=generate_demo, **settings_changes):
     seen: list[str] = []
     renderer = renderer or FakeRenderer()
 
@@ -62,6 +62,7 @@ def _generate(tmp_path, developer_replies: list[str], renderer=None, pitch_reply
             content = pitch_reply
             seen.append("pitch")
             if prompts is not None:
+                prompts["pitch_system"] = messages[0]["content"]
                 prompts["pitch"] = messages[1]["content"]
         else:
             content = developer_replies[min(len(seen) - 1, len(developer_replies) - 1)]
@@ -70,7 +71,10 @@ def _generate(tmp_path, developer_replies: list[str], renderer=None, pitch_reply
 
     async def go():
         async with OllamaCloud("key", ["m1"], transport=httpx.MockTransport(handler), backoff=0) as llm:
-            return await generate_screenshot(llm, renderer, SCORED, replace(_settings(tmp_path), **settings_changes))
+            settings = replace(_settings(tmp_path), **settings_changes)
+            if step is generate_proposal:
+                return await step(llm, SCORED, settings)
+            return await step(llm, renderer, SCORED, settings)
 
     return asyncio.run(go()), seen, renderer
 
@@ -79,7 +83,8 @@ def _saved_files(tmp_path) -> set[str]:
     return {p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*") if p.is_file()}
 
 
-SAVED = {"screenshots/bakery-calculator-123.png", "proposals/bakery-calculator-123.txt"}
+SAVED = {"screenshots/bakery-calculator-123.png", "screenshots/bakery-calculator-123.json",
+         "proposals/bakery-calculator-123.txt", "proposals/bakery-calculator-123.json"}
 
 
 def test_repair_loop_fixes_rejected_page_and_saves_screenshot_and_proposal(tmp_path):
@@ -134,15 +139,73 @@ def test_freelancer_profile_reaches_the_pitch_writer(tmp_path):
     assert "No profile given" not in prompts["pitch"]
 
 
-def test_failed_pitch_keeps_the_screenshot_and_drops_a_stale_proposal(tmp_path):
-    stale = tmp_path / "proposals" / "bakery-calculator-123.txt"
-    stale.parent.mkdir()
-    stale.write_text("A proposal for last week's screenshot", encoding="utf-8")
+def test_failed_pitch_keeps_the_screenshot_and_the_older_proposal(tmp_path):
+    older = tmp_path / "proposals" / "bakery-calculator-123.txt"
+    older.parent.mkdir()
+    older.write_text("A proposal for last week's screenshot", encoding="utf-8")
     shot, seen, _ = _generate(tmp_path, [GOOD_REPLY], pitch_reply=json.dumps({**PITCH, "message": "Hi [Your Name]"}))
     assert seen == ["architect", "developer", "pitch", "pitch"]  # one retry, then give up
-    assert shot.pitch is None and shot.proposal_path is None
-    assert _saved_files(tmp_path) == {"screenshots/bakery-calculator-123.png"}
+    assert shot.pitch is None and shot.proposal_path is None and shot.proposal_version is None
+    assert _saved_files(tmp_path) == {"screenshots/bakery-calculator-123.png", "screenshots/bakery-calculator-123.json",
+                                      "proposals/bakery-calculator-123.txt"}
+    assert older.read_text(encoding="utf-8") == "A proposal for last week's screenshot"
     assert shot.notes[-1].startswith("Pitch Writer failed, so no proposal was saved")
+
+
+def test_screenshot_only_adds_a_version_and_keeps_the_old_files(tmp_path):
+    _generate(tmp_path, [GOOD_REPLY])
+    first = (tmp_path / "screenshots" / "bakery-calculator-123.png").stat().st_mtime_ns
+    shot, seen, _ = _generate(tmp_path, [GOOD_REPLY], step=generate_screenshot)
+    assert seen == ["architect", "developer"]  # no proposal
+    assert shot.version == 2 and shot.path.name == "bakery-calculator-123-v2.png" and shot.pitch is None
+    assert _saved_files(tmp_path) == SAVED | {"screenshots/bakery-calculator-123-v2.png",
+                                              "screenshots/bakery-calculator-123-v2.json"}
+    assert (tmp_path / "screenshots" / "bakery-calculator-123.png").stat().st_mtime_ns == first
+    meta = json.loads((tmp_path / "screenshots" / "bakery-calculator-123-v2.json").read_text(encoding="utf-8"))
+    assert meta["blueprint"] == BLUEPRINT and meta["model"] == "m1" and meta["used_fallback"] is False
+
+
+def test_proposal_only_describes_the_latest_screenshot_and_keeps_older_proposals(tmp_path):
+    _generate(tmp_path, [GOOD_REPLY])
+    _generate(tmp_path, [TEMPLATED_REPLY], step=generate_screenshot)  # v2 is the fallback outline page
+    prompts: dict[str, str] = {}
+    shot, seen, renderer = _generate(tmp_path, [], step=generate_proposal, prompts=prompts,
+                                     pitch_reply=json.dumps({**PITCH, "bid_usd": 0, "delivery_days": 3}))
+    assert seen == ["pitch"] and renderer.pages == []
+    assert shot.version == 2 and shot.used_fallback and shot.path.name == "bakery-calculator-123-v2.png"
+    assert shot.proposal_version == 2 and shot.proposal_path.name == "bakery-calculator-123-v2.txt"
+    assert shot.pitch.delivery_days == 3
+    # The brief saved with the screenshot reaches the Pitch Writer, so it describes that screenshot.
+    assert '"app_title": "Bakery Adder"' in prompts["pitch"] and "only an outline" in prompts["pitch"]
+    meta = json.loads(shot.proposal_path.with_suffix(".json").read_text(encoding="utf-8"))
+    assert meta["screenshot_version"] == 2 and meta["delivery_days"] == 3
+    assert (tmp_path / "proposals" / "bakery-calculator-123.txt").read_text(encoding="utf-8") == PITCH["message"] + "\n"
+
+
+def test_proposal_only_without_a_screenshot_mentions_none(tmp_path):
+    prompts: dict[str, str] = {}
+    shot, seen, renderer = _generate(tmp_path, [], step=generate_proposal, prompts=prompts)
+    assert seen == ["pitch"] and renderer.pages == []
+    assert shot.path is None and shot.version is None and shot.proposal_version == 1
+    assert shot.notes == ["This gig has no screenshot, so this proposal doesn't mention one."]
+    assert "Nothing is attached" in prompts["pitch_system"] and "point to the attached screenshot" not in prompts["pitch_system"]
+    assert "<demo>" not in prompts["pitch"] and "Client budget: not given" in prompts["pitch"]
+    assert _saved_files(tmp_path) == {"proposals/bakery-calculator-123.txt", "proposals/bakery-calculator-123.json"}
+    meta = json.loads(shot.proposal_path.with_suffix(".json").read_text(encoding="utf-8"))
+    assert meta["screenshot_version"] is None
+
+    # A screenshot from before versioning has no brief to describe it by, so it is not mentioned either.
+    (tmp_path / "screenshots").mkdir()
+    (tmp_path / "screenshots" / "bakery-calculator-123.png").write_bytes(PNG)
+    shot, _, _ = _generate(tmp_path, [], step=generate_proposal, prompts=prompts)
+    assert shot.path is None and shot.proposal_version == 2 and "Nothing is attached" in prompts["pitch_system"]
+    assert shot.notes == ["Screenshot v1 was saved before design briefs were kept, so this proposal doesn't mention it."]
+
+
+def test_proposal_with_a_screenshot_points_to_it(tmp_path):
+    prompts: dict[str, str] = {}
+    _generate(tmp_path, [GOOD_REPLY], prompts=prompts)
+    assert "point to the attached screenshot" in prompts["pitch_system"] and "Nothing is attached" not in prompts["pitch_system"]
 
 
 def test_blank_render_is_not_kept(tmp_path):

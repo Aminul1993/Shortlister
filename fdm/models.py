@@ -51,13 +51,19 @@ class Pitch:
 
 @dataclass
 class DemoScreenshot:
-    """What is kept per shortlisted gig: a PNG of the rendered demo page and the proposal that goes with it."""
+    """A saved screenshot of a gig's demo page and, when one was written, the proposal that goes with it.
+
+    A proposal written without a screenshot has no `path`, `version` or `blueprint`.
+    """
 
     demo_id: str
-    path: Path
+    path: Path | None
     scored: ScoredGig
     model: str | None
     used_fallback: bool
     notes: list[str] = field(default_factory=list)
-    pitch: Pitch | None = None  # None if the Pitch Writer failed; the screenshot is still kept
+    pitch: Pitch | None = None  # None if no proposal was written in this run; the screenshot is still kept
     proposal_path: Path | None = None
+    blueprint: Blueprint | None = None  # what the screenshot shows; None for screenshots saved before versioning
+    version: int | None = 1
+    proposal_version: int | None = None

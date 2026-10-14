@@ -5,7 +5,7 @@
   <div>
     <p class="crumb"><a href="{{ url_for('index') }}">← Shortlist</a></p>
     <h1>Job {{ job.id }}</h1>
-    <p class="muted">Started {{ job.created_at.strftime('%d %b %Y, %H:%M:%S') }}</p>
+    <p class="muted">{{ job.mode_label }} · started {{ job.created_at.strftime('%d %b %Y, %H:%M:%S') }}</p>
   </div>
 </section>
 
