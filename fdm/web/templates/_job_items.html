@@ -16,17 +16,20 @@
       </div>
       <span class="pill pill-{{ item.state }}">{{ item.state }}</span>
     </div>
+    {% if item.screenshot %}
+    {% set shot_url = url_for('screenshot', name=item.screenshot, v=job.id) %}
+    <a class="shot" href="{{ shot_url }}" target="_blank" rel="noopener">
+      <img src="{{ shot_url }}" alt="Screenshot of the demo page for {{ item.title }}" loading="lazy">
+    </a>
+    {% endif %}
     <dl class="project-facts">
-      {% if item.live_url %}
-      <div><dt>Live URL</dt><dd><a href="{{ item.live_url }}" target="_blank" rel="noopener noreferrer">{{ item.live_url }}</a></dd></div>
-      {% endif %}
       {% if item.used_fallback %}
-      <div><dt>Built by</dt><dd>Fallback app (agent output failed validation)</dd></div>
+      <div><dt>Built by</dt><dd>Fallback page (agent output failed the checks)</dd></div>
       {% elif item.model %}
       <div><dt>Built by</dt><dd>{{ item.model }}</dd></div>
       {% endif %}
       {% if item.path %}
-      <div><dt>Folder</dt><dd><code>{{ item.path }}</code></dd></div>
+      <div><dt>File</dt><dd><code>{{ item.path }}</code></dd></div>
       {% endif %}
       {% if item.error %}
       <div><dt>Error</dt><dd class="error-text">{{ item.error }}</dd></div>

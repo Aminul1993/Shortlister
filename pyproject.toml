@@ -1,7 +1,7 @@
 [project]
 name = "freelance-demo-machine"
 version = "0.1.0"
-description = "Find easy freelance web gigs, generate FastAPI + Jinja2 demos with Ollama Cloud agents, deploy them to Vercel."
+description = "Find easy freelance web gigs and screenshot proof-of-concept pages written by Ollama Cloud agents."
 requires-python = ">=3.11"
 
 [tool.pytest.ini_options]

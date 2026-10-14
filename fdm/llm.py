@@ -2,9 +2,10 @@
 
 Failure policy per model in the chain (largest first):
   401/403                      -> LLMAuthError immediately (a bad key fails every model)
+  402 (not in plan), 404       -> next model, and skip this one for the client's lifetime
   429 or rate/token/context    -> next (smaller) model right away
   5xx, timeouts, unusable text -> retry the same model with backoff, then next model
-  other 4xx (e.g. 404 model)   -> next model
+  other 4xx                    -> next model
 If a whole pass failed only because of limits, the chain is retried once after a cooldown.
 """
 
@@ -40,7 +41,7 @@ class LLMAuthError(LLMError):
 class _Failure(Exception):
     def __init__(self, kind: str, message: str, retry_after: float | None = None):
         super().__init__(message)
-        self.kind = kind  # "limit" | "transient" | "model"
+        self.kind = kind  # "limit" | "transient" | "unavailable" | "model"
         self.retry_after = retry_after
 
 
@@ -95,6 +96,7 @@ class OllamaCloud:
         if not models:
             raise ValueError("at least one model is required")
         self.models = list(models)
+        self.unavailable: set[str] = set()  # models this account cannot use (402/404)
         self._retries = retries_per_model
         self._rounds = rounds
         self._backoff = backoff
@@ -127,6 +129,8 @@ class OllamaCloud:
             for round_no in range(self._rounds):
                 limited, cooldown = False, 0.0
                 for model in self.models:
+                    if model in self.unavailable:
+                        continue
                     for attempt in range(self._retries + 1):
                         try:
                             reply = await self._chat(model, messages, json_schema, temperature)
@@ -143,11 +147,17 @@ class OllamaCloud:
                             if failure.kind == "limit":
                                 limited = True
                                 cooldown = max(cooldown, failure.retry_after or self._cooldown)
+                            elif failure.kind == "unavailable":
+                                self.unavailable.add(model)
+                                log.warning("Skipping %s for the rest of this run; adjust OLLAMA_MODELS", model)
                             break
                 if not limited or round_no == self._rounds - 1:
                     break
                 log.warning("Every model is rate/token limited; cooling down for %.0fs", cooldown)
                 await asyncio.sleep(cooldown)
+        if not failures:
+            raise LLMError(f"none of the configured models are available to this account: "
+                           f"{', '.join(self.models)}. Set OLLAMA_MODELS to models your plan includes.")
         raise LLMError("all Ollama Cloud models failed: " + "; ".join(failures[-6:]))
 
     async def _chat(self, model: str, messages: list[dict[str, str]], json_schema: dict | None,
@@ -180,6 +190,8 @@ class OllamaCloud:
         detail = _error_detail(response)
         if status in (401, 403):
             raise LLMAuthError(f"Ollama Cloud rejected the API key (HTTP {status}): {detail}")
+        if status in (402, 404):
+            raise _Failure("unavailable", f"HTTP {status}: {detail}")
         if status == 429 or _LIMIT_HINTS.search(detail):
             raise _Failure("limit", f"HTTP {status}: {detail}", _retry_after(response))
         if status >= 500 or status == 408:

@@ -1,6 +1,3 @@
-import pytest
-
-from fdm.cli import parse_selection
 from fdm.models import Gig
 from fdm.ranking import rank_gigs, render_table, score_gig
 
@@ -56,12 +53,3 @@ def test_render_table_has_required_columns_and_escapes_pipes():
     assert table.splitlines()[0] == "| Rank | Title | Platform | Brief | Suitability Score |"
     assert "Calc \\| tool" in table
     assert "/10 |" in table
-
-
-def test_parse_selection():
-    assert parse_selection("1, 4, 7", 10) == [1, 4, 7]
-    assert parse_selection("2,2,3", 10) == [2, 3]
-    assert parse_selection("all", 3) == [1, 2, 3]
-    for bad in ("0", "11", "a", " , "):
-        with pytest.raises(ValueError):
-            parse_selection(bad, 10)

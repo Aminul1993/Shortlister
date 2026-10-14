@@ -31,39 +31,22 @@ class ScoredGig:
 
 @dataclass
 class Blueprint:
-    """Agent A's data contract: what the demo shows and what the template receives."""
+    """Agent A's design brief: what the demo page shows."""
 
     app_title: str
     tagline: str
     demo_summary: str
-    routes: list[dict]
-    template_variables: list[dict]
     ui_sections: list[str]
     sample_data: str
 
 
 @dataclass
-class AppCode:
-    """Agent B's output: the two files that make up a demo app."""
+class DemoScreenshot:
+    """The only artifact kept per shortlisted gig: a PNG of the rendered demo page."""
 
-    index_py: str
-    index_html: str
-
-
-@dataclass
-class GeneratedProject:
-    project_id: str
+    demo_id: str
     path: Path
     scored: ScoredGig
     model: str | None
     used_fallback: bool
     notes: list[str] = field(default_factory=list)
-
-
-@dataclass
-class DeployResult:
-    project_id: str
-    ok: bool
-    live_url: str | None = None
-    deployment_url: str | None = None
-    error: str | None = None

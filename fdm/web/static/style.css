@@ -142,7 +142,7 @@ input[type="checkbox"] { width: 18px; height: 18px; margin: 0; accent-color: var
 .chip { font-size: 12px; padding: 1px 8px; border-radius: 999px; }
 .chip-plus { background: var(--ok-soft); color: var(--ok); }
 .chip-minus { background: var(--err-soft); color: var(--err); }
-.tag { margin-left: 6px; font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--info-soft); color: var(--info); }
+.tag { margin-left: 6px; font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--info-soft); color: var(--info); text-decoration: none; }
 
 .gig-score { display: grid; justify-items: end; gap: 6px; min-width: 64px; }
 .gig-score strong { font-size: 20px; font-variant-numeric: tabular-nums; }
@@ -172,8 +172,8 @@ input[type="checkbox"] { width: 18px; height: 18px; margin: 0; accent-color: var
   display: inline-block; font-size: 12px; font-weight: 600; text-transform: capitalize;
   padding: 2px 10px; border-radius: 999px; background: var(--surface-2); color: var(--muted); white-space: nowrap;
 }
-.pill-running, .pill-generating, .pill-deploying { background: var(--info-soft); color: var(--info); }
-.pill-done, .pill-generated, .pill-live { background: var(--ok-soft); color: var(--ok); }
+.pill-running, .pill-generating { background: var(--info-soft); color: var(--info); }
+.pill-done, .pill-captured { background: var(--ok-soft); color: var(--ok); }
 .pill-failed { background: var(--err-soft); color: var(--err); }
 
 /* Job page */
@@ -196,6 +196,11 @@ input[type="checkbox"] { width: 18px; height: 18px; margin: 0; accent-color: var
 .project-facts dt { color: var(--muted); font-size: 13px; }
 .project-facts dd { margin: 0; overflow-wrap: anywhere; }
 .error-text { color: var(--err); white-space: pre-wrap; font-size: 13px; }
+.shot {
+  display: block; margin: 12px 0 0 40px; max-height: 420px; overflow: hidden;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2);
+}
+.shot img { display: block; width: 100%; height: auto; }
 details { margin: 10px 0 0 40px; color: var(--muted); font-size: 13px; }
 details ul { margin: 6px 0 0; padding-left: 18px; }
 summary { cursor: pointer; }
@@ -203,7 +208,7 @@ summary { cursor: pointer; }
 @media (max-width: 640px) {
   .gig { grid-template-columns: auto minmax(0, 1fr) auto; }
   .gig .gig-rank { display: none; }
-  .project-facts, details { margin-left: 0; }
+  .project-facts, details, .shot { margin-left: 0; }
   .project-facts div { grid-template-columns: 1fr; gap: 0; }
   .actionbar { bottom: 8px; }
 }

@@ -40,14 +40,11 @@ class Settings:
     ollama_api_key: str
     ollama_base_url: str
     ollama_models: tuple[str, ...]
-    vercel_token: str
-    vercel_scope: str
     output_dir: Path
     search_queries: tuple[str, ...]
     rss_feeds: tuple[str, ...]
     results_per_query: int
     llm_concurrency: int
-    deploy_concurrency: int
     max_repairs: int
 
     @classmethod
@@ -57,13 +54,10 @@ class Settings:
             ollama_api_key=os.getenv("OLLAMA_API_KEY", "").strip(),
             ollama_base_url=os.getenv("OLLAMA_BASE_URL", "https://ollama.com").strip().rstrip("/"),
             ollama_models=_csv("OLLAMA_MODELS", DEFAULT_MODELS),
-            vercel_token=os.getenv("VERCEL_TOKEN", "").strip(),
-            vercel_scope=os.getenv("VERCEL_SCOPE", "").strip(),
             output_dir=Path(os.getenv("FDM_OUTPUT_DIR", "output")),
             search_queries=_csv("FDM_SEARCH_QUERIES", DEFAULT_QUERIES),
             rss_feeds=_csv("FDM_RSS_FEEDS", ()),
             results_per_query=_int("FDM_RESULTS_PER_QUERY", 50),
             llm_concurrency=_int("FDM_LLM_CONCURRENCY", 2),
-            deploy_concurrency=_int("FDM_DEPLOY_CONCURRENCY", 2),
             max_repairs=_int("FDM_MAX_REPAIRS", 2),
         )

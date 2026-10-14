@@ -68,6 +68,36 @@ def test_unparseable_reply_moves_down_the_chain():
     assert calls == ["big", "small"]
 
 
+def test_model_outside_plan_is_skipped_for_later_calls():
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        model = json.loads(request.content)["model"]
+        calls.append(model)
+        if model == "big":
+            return httpx.Response(402, json={"error": "This model is not in the Free plan."})
+        return ok('{"ok": true}')
+
+    async def go():
+        async with OllamaCloud("key", ["big", "small"], transport=httpx.MockTransport(handler), backoff=0) as llm:
+            first = await llm.complete(MESSAGES, parse=parse_json_object)
+            second = await llm.complete(MESSAGES, parse=parse_json_object)
+            return first, second, llm.unavailable
+
+    first, second, unavailable = asyncio.run(go())
+    assert first[1] == second[1] == "small"
+    assert calls == ["big", "small", "small"]
+    assert unavailable == {"big"}
+
+
+def test_no_usable_models_gives_actionable_error():
+    def handler(model, _):
+        return httpx.Response(404, json={"error": f"model '{model}' not found"})
+
+    with pytest.raises(LLMError, match="not found"):
+        run(handler)
+
+
 def test_auth_error_is_fatal():
     with pytest.raises(LLMAuthError):
         run(lambda model, _: httpx.Response(401, json={"error": "unauthorized"}))

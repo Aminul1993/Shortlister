@@ -1,1 +1,1 @@
-"""Freelance Demo Machine: find easy gigs, build FastAPI + Jinja2 demos, deploy them."""
+"""Shortlister: find easy gigs and screenshot a generated proof-of-concept page for each."""

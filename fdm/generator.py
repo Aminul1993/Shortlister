@@ -1,29 +1,46 @@
-"""Phase 2: run Architect -> Developer -> validate/repair for every shortlisted gig."""
+"""Phase 2: Architect -> Developer -> check/render/repair for every shortlisted gig, keeping only a screenshot.
+
+The page HTML only ever exists in memory and in a temporary file while it is rendered; each gig
+ends up as a single PNG in output/screenshots/.
+"""
 
 from __future__ import annotations
 
-import asyncio
 import logging
+from pathlib import Path
 
 from .agents import default_blueprint, run_architect, run_developer, run_repair
 from .config import Settings
 from .llm import LLMAuthError, LLMError, OllamaCloud
-from .models import AppCode, GeneratedProject, ScoredGig
-from .scaffold import fallback_app, make_project_id, project_metadata, write_project
-from .validate import normalize_app, validate_app
+from .models import DemoScreenshot, ScoredGig
+from .pages import ensure_tailwind, fallback_page, make_demo_id
+from .screenshot import BrowserError, Renderer, Shot
+from .validate import page_problems
 
 log = logging.getLogger(__name__)
 
+SCREENSHOT_DIR = "screenshots"
 
-async def generate_project(llm: OllamaCloud, scored: ScoredGig, settings: Settings, *,
-                           smoke: bool = True) -> GeneratedProject:
+
+def screenshot_path(output_dir: Path, demo_id: str) -> Path:
+    return output_dir / SCREENSHOT_DIR / f"{demo_id}.png"
+
+
+def _attempt_note(attempt: int, problems: list[str]) -> str:
+    headlines = "; ".join(problem.splitlines()[0] for problem in problems)
+    if len(headlines) > 400:
+        headlines = headlines[:399] + "…"
+    return f"Check {attempt} found {len(problems)} problem(s): {headlines}"
+
+
+async def generate_screenshot(llm: OllamaCloud, renderer: Renderer, scored: ScoredGig,
+                              settings: Settings) -> DemoScreenshot:
     gig = scored.gig
-    project_id = make_project_id(gig)
-    path = settings.output_dir / project_id
+    demo_id = make_demo_id(gig)
     notes: list[str] = []
     model: str | None = None
 
-    log.info("[%s] Architect is designing the demo", project_id)
+    log.info("[%s] Architect is designing the demo", demo_id)
     try:
         blueprint, model = await run_architect(llm, gig)
     except LLMAuthError:
@@ -32,41 +49,45 @@ async def generate_project(llm: OllamaCloud, scored: ScoredGig, settings: Settin
         notes.append(f"Architect failed, using the default blueprint: {exc}")
         blueprint = default_blueprint(gig)
 
-    accepted: AppCode | None = None
+    accepted: Shot | None = None
+    usable: Shot | None = None  # latest draft that rendered real content, kept if repairs run out
     try:
-        log.info("[%s] Developer is writing index.py and templates/index.html", project_id)
-        draft, model = await run_developer(llm, gig, blueprint)
+        log.info("[%s] Developer is writing the page", demo_id)
+        html, model = await run_developer(llm, gig, blueprint)
         for attempt in range(settings.max_repairs + 1):
-            draft = normalize_app(draft)
-            problems = await asyncio.to_thread(validate_app, draft, path, smoke=smoke)
+            html = ensure_tailwind(html)
+            problems = page_problems(html)
             if not problems:
-                accepted = draft
-                break
-            notes.append(f"Validation attempt {attempt + 1} found {len(problems)} problem(s): {problems[0][:300]}")
-            log.warning("[%s] %s", project_id, notes[-1])
+                shot = await renderer.render(html)
+                problems = shot.problems
+                if not problems:
+                    accepted = shot
+                    break
+                if shot.usable:
+                    usable = shot
+            notes.append(_attempt_note(attempt + 1, problems))
+            log.warning("[%s] %s", demo_id, notes[-1])
             if attempt < settings.max_repairs:
-                draft, model = await run_repair(llm, gig, blueprint, draft, problems)
+                html, model = await run_repair(llm, gig, blueprint, html, problems)
     except LLMAuthError:
         raise
     except LLMError as exc:
         notes.append(f"Developer failed: {exc}")
 
-    used_fallback = accepted is None
-    if used_fallback:
-        log.warning("[%s] Shipping the fallback demo app", project_id)
-        accepted = fallback_app(gig, blueprint)
+    used_fallback = False
+    if accepted is None and usable is not None:
+        accepted = usable
+        notes.append("Kept the screenshot of the last draft that rendered content, despite the problems above.")
+    if accepted is None:
+        log.warning("[%s] Rendering the fallback page", demo_id)
+        used_fallback = True
+        accepted = await renderer.render(fallback_page(gig, blueprint))
+        if accepted.png is None:
+            raise BrowserError(f"could not render even the fallback page: {'; '.join(accepted.problems)}")
+    notes += accepted.warnings
 
-    write_project(path, accepted, project_metadata(gig, scored.score, blueprint, model, used_fallback, notes))
-    log.info("[%s] Wrote %s", project_id, path)
-    return GeneratedProject(project_id, path, scored, model, used_fallback, notes)
-
-
-async def generate_all(chosen: list[ScoredGig], settings: Settings, *, smoke: bool = True) -> list[GeneratedProject]:
-    settings.output_dir.mkdir(parents=True, exist_ok=True)
-    async with OllamaCloud(
-        settings.ollama_api_key,
-        settings.ollama_models,
-        settings.ollama_base_url,
-        concurrency=settings.llm_concurrency,
-    ) as llm:
-        return list(await asyncio.gather(*(generate_project(llm, s, settings, smoke=smoke) for s in chosen)))
+    path = screenshot_path(settings.output_dir, demo_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(accepted.png)
+    log.info("[%s] Saved %s", demo_id, path)
+    return DemoScreenshot(demo_id, path, scored, model, used_fallback, notes)

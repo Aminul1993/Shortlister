@@ -15,7 +15,7 @@
 </section>
 
 {% if not can_generate %}
-<div class="flash flash-warn">Set <code>OLLAMA_API_KEY</code> in <code>.env</code> and restart the portal to create projects.</div>
+<div class="flash flash-warn">Set <code>OLLAMA_API_KEY</code> in <code>.env</code> and restart the portal to create screenshots.</div>
 {% endif %}
 
 {% if rows %}
@@ -40,7 +40,7 @@
             {% if gig.budget_max_usd %} · up to ${{ '{:,.0f}'.format(gig.budget_max_usd) }}{% endif %}
             {% if gig.pay_type and gig.pay_type != 'unknown' %} · {{ gig.pay_type }}{% endif %}
             · <a href="{{ gig.url }}" target="_blank" rel="noopener noreferrer">View gig ↗</a>
-            {% if row.built %}<span class="tag">already built</span>{% endif %}
+            {% if row.screenshot %}<a class="tag" href="{{ url_for('screenshot', name=row.screenshot) }}" target="_blank" rel="noopener">screenshot saved</a>{% endif %}
           </span>
           <span class="gig-brief">{{ gig.description }}</span>
           {% if row.item.signals %}
@@ -62,13 +62,8 @@
 
   <div class="actionbar">
     <span id="selected-count">0 selected</span>
-    <label class="check"><input type="checkbox" name="smoke" checked> Smoke-test apps</label>
-    <label class="check{% if not can_deploy %} disabled{% endif %}"
-           {% if not can_deploy %}title="Set VERCEL_TOKEN in .env and restart the portal to enable"{% endif %}>
-      <input type="checkbox" name="deploy" {% if can_deploy %}checked{% else %}disabled{% endif %}> Deploy to Vercel
-    </label>
     <button class="btn btn-primary" type="submit" id="create-btn" disabled
-            {% if not can_generate %}data-locked="1"{% endif %}>Create projects</button>
+            {% if not can_generate %}data-locked="1"{% endif %}>Create screenshots</button>
   </div>
 </form>
 {% else %}
@@ -85,7 +80,7 @@
   <ul>
     {% for job in jobs %}
     <li>
-      <a href="{{ url_for('job_detail', job_id=job.id) }}">{{ job.created_at.strftime('%H:%M:%S') }} · {{ job.items|length }} project{{ 's' if job.items|length != 1 }}</a>
+      <a href="{{ url_for('job_detail', job_id=job.id) }}">{{ job.created_at.strftime('%H:%M:%S') }} · {{ job.items|length }} screenshot{{ 's' if job.items|length != 1 }}</a>
       <span class="pill pill-{{ job.state }}">{{ job.state }}</span>
     </li>
     {% endfor %}

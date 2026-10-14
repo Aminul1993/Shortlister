@@ -1,4 +1,4 @@
-"""Shortlist persistence shared by the CLI and the web portal."""
+"""Shortlist persistence for the web portal."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Flask web portal: browse the shortlist, select gigs, and watch their demo projects being built."""
+"""Flask web portal: browse the shortlist, select gigs, and watch their demo screenshots being made."""
 
 from __future__ import annotations
 
@@ -7,11 +7,12 @@ import logging
 import os
 import secrets
 
-from flask import Flask, abort, flash, redirect, render_template, request, session, url_for
+from flask import Flask, abort, flash, redirect, render_template, request, send_from_directory, session, url_for
 
 from ..config import Settings
+from ..generator import SCREENSHOT_DIR, screenshot_path
+from ..pages import make_demo_id
 from ..ranking import rank_gigs
-from ..scaffold import make_project_id
 from ..sources import fetch_gigs
 from ..store import gig_key, load_shortlist, save_shortlist, shortlist_updated_at
 from .jobs import JobManager
@@ -35,7 +36,7 @@ def create_app(settings: Settings | None = None, *, top: int = 10) -> Flask:
 
     @app.before_request
     def check_csrf():
-        # Every POST spends LLM tokens or deploys, so other sites must not be able to trigger one.
+        # Every POST spends LLM tokens or queries the gig feeds, so other sites must not be able to trigger one.
         if request.method == "POST":
             sent = request.form.get("csrf", "")
             if not sent or not secrets.compare_digest(sent, session.get("csrf", "")):
@@ -43,22 +44,17 @@ def create_app(settings: Settings | None = None, *, top: int = 10) -> Flask:
 
     @app.get("/")
     def index():
-        rows = [
-            {
-                "rank": rank,
-                "key": gig_key(scored.gig),
-                "item": scored,
-                "built": (settings.output_dir / make_project_id(scored.gig) / "index.py").is_file(),
-            }
-            for rank, scored in enumerate(load_shortlist(settings.output_dir), 1)
-        ]
+        rows = []
+        for rank, scored in enumerate(load_shortlist(settings.output_dir), 1):
+            shot = screenshot_path(settings.output_dir, make_demo_id(scored.gig))
+            rows.append({"rank": rank, "key": gig_key(scored.gig), "item": scored,
+                         "screenshot": shot.name if shot.is_file() else None})
         return render_template(
             "index.html",
             rows=rows,
             updated=shortlist_updated_at(settings.output_dir),
             jobs=jobs.recent(),
             can_generate=bool(settings.ollama_api_key),
-            can_deploy=bool(settings.vercel_token),
         )
 
     @app.post("/refresh")
@@ -80,7 +76,7 @@ def create_app(settings: Settings | None = None, *, top: int = 10) -> Flask:
     @app.post("/jobs")
     def create_job():
         if not settings.ollama_api_key:
-            flash("Set OLLAMA_API_KEY in .env and restart the portal before creating projects.", "error")
+            flash("Set OLLAMA_API_KEY in .env and restart the portal before creating screenshots.", "error")
             return redirect(url_for("index"))
         shortlist = {gig_key(s.gig): (rank, s) for rank, s in enumerate(load_shortlist(settings.output_dir), 1)}
         selected = request.form.getlist("gig")
@@ -89,11 +85,7 @@ def create_app(settings: Settings | None = None, *, top: int = 10) -> Flask:
             flash("The shortlist changed since you loaded it. Select again." if selected
                   else "Select at least one gig.", "error")
             return redirect(url_for("index"))
-        job_id = jobs.submit(
-            chosen,
-            deploy=request.form.get("deploy") == "on" and bool(settings.vercel_token),
-            smoke=request.form.get("smoke") == "on",
-        )
+        job_id = jobs.submit(chosen)
         return redirect(url_for("job_detail", job_id=job_id))
 
     @app.get("/jobs/<job_id>")
@@ -109,5 +101,9 @@ def create_app(settings: Settings | None = None, *, top: int = 10) -> Flask:
         if job is None:
             abort(404)
         return render_template("_job_items.html", job=job)
+
+    @app.get("/screenshots/<path:name>")
+    def screenshot(name: str):
+        return send_from_directory((settings.output_dir / SCREENSHOT_DIR).resolve(), name)
 
     return app

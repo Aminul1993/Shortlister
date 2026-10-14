@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Shortlist{% endblock %} · Freelance Demo Machine</title>
+  <title>{% block title %}Shortlist{% endblock %} · Shortlister</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <script src="{{ url_for('static', filename='portal.js') }}" defer></script>
 </head>
 <body>
   <header class="topbar">
     <div class="wrap topbar-inner">
-      <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark" aria-hidden="true">FD</span>Freelance Demo Machine</a>
+      <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark" aria-hidden="true">FD</span>Shortlister</a>
       <nav><a href="{{ url_for('index') }}">Shortlist</a></nav>
     </div>
   </header>
