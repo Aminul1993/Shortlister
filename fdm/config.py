@@ -46,6 +46,9 @@ class Settings:
     results_per_query: int
     llm_concurrency: int
     max_repairs: int
+    # Facts the Pitch Writer may use about you. It never invents experience, so leaving these empty is safe.
+    freelancer_name: str = ""
+    freelancer_profile: str = ""
 
     @classmethod
     def load(cls, env_file: str | os.PathLike[str] = ".env") -> Settings:
@@ -60,4 +63,6 @@ class Settings:
             results_per_query=_int("FDM_RESULTS_PER_QUERY", 50),
             llm_concurrency=_int("FDM_LLM_CONCURRENCY", 2),
             max_repairs=_int("FDM_MAX_REPAIRS", 2),
+            freelancer_name=os.getenv("FDM_FREELANCER_NAME", "").strip(),
+            freelancer_profile=os.getenv("FDM_FREELANCER_PROFILE", "").strip(),
         )

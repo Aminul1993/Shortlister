@@ -22,6 +22,20 @@
       <img src="{{ shot_url }}" alt="Screenshot of the demo page for {{ item.title }}" loading="lazy">
     </a>
     {% endif %}
+    {% if item.proposal %}
+    <section class="proposal" aria-label="Proposal for {{ item.title }}">
+      <div class="proposal-head">
+        <h3>Proposal</h3>
+        <span class="muted">
+          {{ item.proposal|wordcount }} words
+          {% if item.bid %} · suggested bid {{ item.bid }}{% endif %}
+          {% if item.delivery_days %} · {{ item.delivery_days }} day{{ 's' if item.delivery_days != 1 }}{% endif %}
+        </span>
+        <button type="button" class="btn btn-secondary btn-small" data-copy="proposal-{{ loop.index }}">Copy</button>
+      </div>
+      <p class="proposal-text" id="proposal-{{ loop.index }}">{{ item.proposal }}</p>
+    </section>
+    {% endif %}
     <dl class="project-facts">
       {% if item.used_fallback %}
       <div><dt>Built by</dt><dd>Fallback page (agent output failed the checks)</dd></div>
@@ -29,7 +43,10 @@
       <div><dt>Built by</dt><dd>{{ item.model }}</dd></div>
       {% endif %}
       {% if item.path %}
-      <div><dt>File</dt><dd><code>{{ item.path }}</code></dd></div>
+      <div><dt>Screenshot</dt><dd><code>{{ item.path }}</code></dd></div>
+      {% endif %}
+      {% if item.proposal_path %}
+      <div><dt>Proposal</dt><dd><a href="{{ url_for('proposal', name=item.proposal_file, v=job.id) }}" target="_blank" rel="noopener"><code>{{ item.proposal_path }}</code></a></dd></div>
       {% endif %}
       {% if item.error %}
       <div><dt>Error</dt><dd class="error-text">{{ item.error }}</dd></div>

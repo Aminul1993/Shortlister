@@ -41,6 +41,7 @@
             {% if gig.pay_type and gig.pay_type != 'unknown' %} · {{ gig.pay_type }}{% endif %}
             · <a href="{{ gig.url }}" target="_blank" rel="noopener noreferrer">View gig ↗</a>
             {% if row.screenshot %}<a class="tag" href="{{ url_for('screenshot', name=row.screenshot) }}" target="_blank" rel="noopener">screenshot saved</a>{% endif %}
+            {% if row.proposal %}<a class="tag" href="{{ url_for('proposal', name=row.proposal) }}" target="_blank" rel="noopener">proposal saved</a>{% endif %}
           </span>
           <span class="gig-brief">{{ gig.description }}</span>
           {% if row.item.signals %}
@@ -63,7 +64,7 @@
   <div class="actionbar">
     <span id="selected-count">0 selected</span>
     <button class="btn btn-primary" type="submit" id="create-btn" disabled
-            {% if not can_generate %}data-locked="1"{% endif %}>Create screenshots</button>
+            {% if not can_generate %}data-locked="1"{% endif %}>Create screenshots &amp; proposals</button>
   </div>
 </form>
 {% else %}

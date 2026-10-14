@@ -41,8 +41,17 @@ class Blueprint:
 
 
 @dataclass
+class Pitch:
+    """Agent C's proposal: the message to send the client, plus a suggested bid for the bid form."""
+
+    message: str
+    bid_usd: float | None = None  # fixed price, or hourly rate for hourly gigs; always inside the client's budget
+    delivery_days: int | None = None
+
+
+@dataclass
 class DemoScreenshot:
-    """The only artifact kept per shortlisted gig: a PNG of the rendered demo page."""
+    """What is kept per shortlisted gig: a PNG of the rendered demo page and the proposal that goes with it."""
 
     demo_id: str
     path: Path
@@ -50,3 +59,5 @@ class DemoScreenshot:
     model: str | None
     used_fallback: bool
     notes: list[str] = field(default_factory=list)
+    pitch: Pitch | None = None  # None if the Pitch Writer failed; the screenshot is still kept
+    proposal_path: Path | None = None

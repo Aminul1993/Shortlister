@@ -201,6 +201,15 @@ input[type="checkbox"] { width: 18px; height: 18px; margin: 0; accent-color: var
   border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2);
 }
 .shot img { display: block; width: 100%; height: auto; }
+.proposal {
+  margin: 12px 0 0 40px; padding: 14px 16px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+}
+.proposal-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.proposal-head h3 { margin: 0; font-size: 15px; }
+.proposal-head .muted { margin: 0; font-size: 13px; margin-right: auto; }
+.btn-small { padding: 4px 12px; font-size: 13px; border-radius: 8px; }
+.proposal-text { margin: 10px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; max-width: 72ch; }
 details { margin: 10px 0 0 40px; color: var(--muted); font-size: 13px; }
 details ul { margin: 6px 0 0; padding-left: 18px; }
 summary { cursor: pointer; }
@@ -208,7 +217,7 @@ summary { cursor: pointer; }
 @media (max-width: 640px) {
   .gig { grid-template-columns: auto minmax(0, 1fr) auto; }
   .gig .gig-rank { display: none; }
-  .project-facts, details, .shot { margin-left: 0; }
+  .project-facts, details, .shot, .proposal { margin-left: 0; }
   .project-facts div { grid-template-columns: 1fr; gap: 0; }
   .actionbar { bottom: 8px; }
 }

@@ -1,7 +1,7 @@
-"""Phase 2: Architect -> Developer -> check/render/repair for every shortlisted gig, keeping only a screenshot.
+"""Phase 2: Architect -> Developer -> check/render/repair -> Pitch Writer for every shortlisted gig.
 
-The page HTML only ever exists in memory and in a temporary file while it is rendered; each gig
-ends up as a single PNG in output/screenshots/.
+The page HTML only ever exists in memory and in a temporary file while it is rendered. Each gig
+ends up as a PNG in output/screenshots/ and the proposal to send with it in output/proposals/.
 """
 
 from __future__ import annotations
@@ -9,10 +9,10 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from .agents import default_blueprint, run_architect, run_developer, run_repair
+from .agents import default_blueprint, run_architect, run_developer, run_pitch_writer, run_repair
 from .config import Settings
 from .llm import LLMAuthError, LLMError, OllamaCloud
-from .models import DemoScreenshot, ScoredGig
+from .models import DemoScreenshot, Pitch, ScoredGig
 from .pages import ensure_tailwind, fallback_page, make_demo_id
 from .screenshot import BrowserError, Renderer, Shot
 from .validate import page_problems
@@ -20,10 +20,15 @@ from .validate import page_problems
 log = logging.getLogger(__name__)
 
 SCREENSHOT_DIR = "screenshots"
+PROPOSAL_DIR = "proposals"
 
 
 def screenshot_path(output_dir: Path, demo_id: str) -> Path:
     return output_dir / SCREENSHOT_DIR / f"{demo_id}.png"
+
+
+def proposal_path(output_dir: Path, demo_id: str) -> Path:
+    return output_dir / PROPOSAL_DIR / f"{demo_id}.txt"
 
 
 def _attempt_note(attempt: int, problems: list[str]) -> str:
@@ -90,4 +95,24 @@ async def generate_screenshot(llm: OllamaCloud, renderer: Renderer, scored: Scor
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(accepted.png)
     log.info("[%s] Saved %s", demo_id, path)
-    return DemoScreenshot(demo_id, path, scored, model, used_fallback, notes)
+
+    # Written last so it describes the screenshot that was actually kept, outline page included.
+    log.info("[%s] Pitch Writer is drafting the proposal", demo_id)
+    pitch: Pitch | None = None
+    try:
+        pitch, _ = await run_pitch_writer(llm, gig, blueprint, working_mockup=not used_fallback,
+                                          freelancer_name=settings.freelancer_name,
+                                          freelancer_profile=settings.freelancer_profile)
+    except LLMAuthError:
+        raise
+    except LLMError as exc:
+        notes.append(f"Pitch Writer failed, so no proposal was saved: {exc}")
+
+    proposal = proposal_path(settings.output_dir, demo_id)
+    if pitch is None:
+        proposal.unlink(missing_ok=True)  # an older proposal would describe a different screenshot
+        return DemoScreenshot(demo_id, path, scored, model, used_fallback, notes)
+    proposal.parent.mkdir(parents=True, exist_ok=True)
+    proposal.write_text(pitch.message + "\n", encoding="utf-8")
+    log.info("[%s] Saved %s", demo_id, proposal)
+    return DemoScreenshot(demo_id, path, scored, model, used_fallback, notes, pitch, proposal)

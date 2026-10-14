@@ -1,4 +1,4 @@
-"""Flask web portal: browse the shortlist, select gigs, and watch their demo screenshots being made."""
+"""Flask web portal: browse the shortlist, select gigs, and watch their screenshots and proposals being made."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import secrets
 from flask import Flask, abort, flash, redirect, render_template, request, send_from_directory, session, url_for
 
 from ..config import Settings
-from ..generator import SCREENSHOT_DIR, screenshot_path
+from ..generator import PROPOSAL_DIR, SCREENSHOT_DIR, proposal_path, screenshot_path
 from ..pages import make_demo_id
 from ..ranking import rank_gigs
 from ..sources import fetch_gigs
@@ -46,9 +46,12 @@ def create_app(settings: Settings | None = None, *, top: int = 10) -> Flask:
     def index():
         rows = []
         for rank, scored in enumerate(load_shortlist(settings.output_dir), 1):
-            shot = screenshot_path(settings.output_dir, make_demo_id(scored.gig))
+            demo_id = make_demo_id(scored.gig)
+            shot = screenshot_path(settings.output_dir, demo_id)
+            proposal = proposal_path(settings.output_dir, demo_id)
             rows.append({"rank": rank, "key": gig_key(scored.gig), "item": scored,
-                         "screenshot": shot.name if shot.is_file() else None})
+                         "screenshot": shot.name if shot.is_file() else None,
+                         "proposal": proposal.name if proposal.is_file() else None})
         return render_template(
             "index.html",
             rows=rows,
@@ -105,5 +108,9 @@ def create_app(settings: Settings | None = None, *, top: int = 10) -> Flask:
     @app.get("/screenshots/<path:name>")
     def screenshot(name: str):
         return send_from_directory((settings.output_dir / SCREENSHOT_DIR).resolve(), name)
+
+    @app.get("/proposals/<path:name>")
+    def proposal(name: str):
+        return send_from_directory((settings.output_dir / PROPOSAL_DIR).resolve(), name)
 
     return app

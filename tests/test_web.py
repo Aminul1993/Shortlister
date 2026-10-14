@@ -6,8 +6,8 @@ import pytest
 
 import fdm.web.jobs as jobs_module
 from fdm.config import Settings
-from fdm.models import DemoScreenshot, Gig, ScoredGig
-from fdm.generator import screenshot_path
+from fdm.models import DemoScreenshot, Gig, Pitch, ScoredGig
+from fdm.generator import proposal_path, screenshot_path
 from fdm.pages import make_demo_id
 from fdm.screenshot import BrowserError
 from fdm.store import gig_key, load_shortlist, save_shortlist
@@ -104,7 +104,11 @@ def test_create_job_generates_selected_gigs(settings, monkeypatch):
         path = screenshot_path(settings_.output_dir, make_demo_id(scored_gig.gig))
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"\x89PNG fake")
-        return DemoScreenshot(path.stem, path, scored_gig, "fake-model", False, ["passed first try"])
+        pitch = Pitch("You want a BMI calculator <that> works.\n\nThe attached screenshot shows it.", 95, 2)
+        proposal = proposal_path(settings_.output_dir, path.stem)
+        proposal.parent.mkdir(parents=True, exist_ok=True)
+        proposal.write_text(pitch.message + "\n", encoding="utf-8")
+        return DemoScreenshot(path.stem, path, scored_gig, "fake-model", False, ["passed first try"], pitch, proposal)
 
     monkeypatch.setattr(jobs_module, "generate_screenshot", fake_generate)
     save_shortlist(SHORTLIST, settings.output_dir)
@@ -129,6 +133,17 @@ def test_create_job_generates_selected_gigs(settings, monkeypatch):
     image.close()
     assert client.get("/screenshots/..%2Ftop10.json").status_code == 404
     assert "screenshot saved" in client.get("/").get_data(as_text=True)
+
+    # The proposal is shown escaped with its line breaks, ready to copy, beside the suggested bid.
+    assert item.proposal.startswith("You want a BMI calculator") and item.bid == "~$95" and item.delivery_days == 2
+    assert ('id="proposal-1">You want a BMI calculator &lt;that&gt; works.\n\nThe attached screenshot shows it.</p>'
+            in page)
+    assert 'data-copy="proposal-1"' in page and "suggested bid ~$95" in page and "2 days" in page
+    text = client.get("/proposals/bmi-calculator-202.txt")
+    assert text.mimetype == "text/plain" and text.get_data(as_text=True).startswith("You want a BMI calculator")
+    text.close()
+    assert client.get("/proposals/..%2Ftop10.json").status_code == 404
+    assert "proposal saved" in client.get("/").get_data(as_text=True)
     fragment = client.get(f"/jobs/{job_id}/items").get_data(as_text=True)
     assert 'data-finished="true"' in fragment and "1 of 1 finished" in fragment
     assert client.get("/jobs/nope").status_code == 404

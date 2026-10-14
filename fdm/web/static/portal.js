@@ -34,6 +34,21 @@
   // Coming back via the browser's back button restores the busy state from cache; reload instead.
   window.addEventListener("pageshow", (event) => { if (event.persisted) location.reload(); });
 
+  // Job page: copy a proposal to the clipboard. Delegated, because polling replaces the item list.
+  document.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-copy]");
+    const source = button && document.getElementById(button.dataset.copy);
+    if (!source) return;
+    try {
+      await navigator.clipboard.writeText(source.textContent);
+      button.textContent = "Copied";
+    } catch {
+      getSelection().selectAllChildren(source); // no clipboard access: leave it selected for Ctrl+C
+      button.textContent = "Selected";
+    }
+    setTimeout(() => { button.textContent = "Copy"; }, 2000);
+  });
+
   // Job page: re-render the server-side item list until the job finishes.
   const items = document.getElementById("job-items");
   if (items) {

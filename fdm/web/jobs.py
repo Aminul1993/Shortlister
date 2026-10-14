@@ -1,4 +1,4 @@
-"""Background jobs for the portal: screenshot a generated demo page for each gig a user selected.
+"""Background jobs for the portal: screenshot a generated demo page and write a proposal for each selected gig.
 
 Jobs run one at a time on a single daemon worker thread, so two jobs never write the same
 screenshot or compete for Ollama rate limits. Each gig inside a job is processed concurrently
@@ -22,7 +22,7 @@ from datetime import datetime
 from ..config import Settings
 from ..generator import generate_screenshot
 from ..llm import OllamaCloud
-from ..models import ScoredGig
+from ..models import Pitch, ScoredGig
 from ..screenshot import Renderer
 
 log = logging.getLogger(__name__)
@@ -42,6 +42,17 @@ class ItemStatus:
     used_fallback: bool = False
     error: str | None = None
     notes: list[str] = field(default_factory=list)
+    proposal: str | None = None  # the message to send the client
+    proposal_file: str | None = None  # file name inside output/proposals/
+    proposal_path: str | None = None
+    bid: str | None = None  # e.g. "~$120" or "~$15/hr"
+    delivery_days: int | None = None
+
+
+def _bid_label(pitch: Pitch | None, pay_type: str) -> str | None:
+    if pitch is None or pitch.bid_usd is None:
+        return None
+    return f"~${pitch.bid_usd:,.0f}{'/hr' if pay_type == 'hourly' else ''}"
 
 
 @dataclass
@@ -131,5 +142,11 @@ class JobManager:
             log.exception("Generating '%s' failed", item.title)
             self._update(item, state="failed", error=str(exc) or type(exc).__name__)
             return
+        pitch, proposal = shot.pitch, shot.proposal_path
         self._update(item, state="captured", screenshot=shot.path.name, path=str(shot.path), model=shot.model,
-                     used_fallback=shot.used_fallback, notes=list(shot.notes))
+                     used_fallback=shot.used_fallback, notes=list(shot.notes),
+                     proposal=pitch.message if pitch else None,
+                     proposal_file=proposal.name if proposal else None,
+                     proposal_path=str(proposal) if proposal else None,
+                     bid=_bid_label(pitch, scored.gig.pay_type),
+                     delivery_days=pitch.delivery_days if pitch else None)
