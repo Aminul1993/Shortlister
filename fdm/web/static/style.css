@@ -99,6 +99,9 @@ h2 { font-size: 18px; margin: 36px 0 12px; }
 .btn-secondary { background: var(--surface); color: var(--text); border-color: var(--border); }
 .btn-secondary:not(:disabled):hover { background: var(--surface-2); }
 .btn:focus-visible, .gig:focus-within, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+a.btn { display: inline-block; text-decoration: none; }
+a.btn-primary:hover { color: var(--accent-ink); }
+a.btn-secondary:hover { color: var(--text); }
 
 .check { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
 .check.disabled { color: var(--muted); cursor: not-allowed; }
@@ -142,7 +145,9 @@ input[type="checkbox"] { width: 18px; height: 18px; margin: 0; accent-color: var
 .chip { font-size: 12px; padding: 1px 8px; border-radius: 999px; }
 .chip-plus { background: var(--ok-soft); color: var(--ok); }
 .chip-minus { background: var(--err-soft); color: var(--err); }
-.tag { margin-left: 6px; font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--info-soft); color: var(--info); text-decoration: none; }
+.tag { margin-left: 6px; font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--info-soft); color: var(--info); text-decoration: none; white-space: nowrap; }
+.tag-bid { background: var(--ok-soft); color: var(--ok); font-weight: 600; }
+.tag-placed { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 
 .gig-score { display: grid; justify-items: end; gap: 6px; min-width: 64px; }
 .gig-score strong { font-size: 20px; font-variant-numeric: tabular-nums; }
@@ -197,11 +202,6 @@ input[type="checkbox"] { width: 18px; height: 18px; margin: 0; accent-color: var
 .project-facts dt { color: var(--muted); font-size: 13px; }
 .project-facts dd { margin: 0; overflow-wrap: anywhere; }
 .error-text { color: var(--err); white-space: pre-wrap; font-size: 13px; }
-.shot {
-  display: block; margin: 12px 0 0 40px; max-height: 420px; overflow: hidden;
-  border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2);
-}
-.shot img { display: block; width: 100%; height: auto; }
 .proposal {
   margin: 12px 0 0 40px; padding: 14px 16px;
   background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
@@ -222,16 +222,41 @@ summary { cursor: pointer; }
 .version-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
 .version-head h3 { margin: 0; font-size: 15px; }
 .version-head .muted { margin: 0 auto 0 0; font-size: 13px; }
-.version .shot, .version details { margin-left: 0; }
-.version + .version .shot { max-height: 200px; }
+.version details { margin-left: 0; }
 .version .file { margin: 10px 0 0; font-size: 13px; overflow-wrap: anywhere; }
 .warn-text { margin: 10px 0 0; color: var(--warn); font-size: 13px; }
+.bid-cta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 0; }
+.bid-cta .muted { margin: 0; font-size: 13px; }
+
+/* Bid page */
+.facts {
+  display: grid; gap: 6px; margin: 0 0 16px; padding: 16px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.facts div { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; }
+.facts dt { color: var(--muted); font-size: 13px; }
+.facts dd { margin: 0; overflow-wrap: anywhere; }
+.bid-form {
+  display: grid; gap: 14px; padding: 16px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow);
+}
+.bid-form .flash { margin: 0; }
+.bid-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.bid-form label { display: grid; gap: 4px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.bid-form input, .bid-form textarea {
+  font: inherit; font-size: 15px; font-weight: 400; color: var(--text); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+}
+.bid-form textarea { min-height: 280px; resize: vertical; }
+.bid-form input:focus-visible, .bid-form textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.bid-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.bid-actions .muted { margin: 0; font-size: 13px; flex: 1 1 260px; }
 
 @media (max-width: 640px) {
   .gig { grid-template-columns: auto minmax(0, 1fr) auto; }
   .gig .gig-rank { display: none; }
-  .project-facts, details, .shot, .proposal { margin-left: 0; }
-  .project-facts div { grid-template-columns: 1fr; gap: 0; }
+  .project-facts, details, .proposal { margin-left: 0; }
+  .project-facts div, .facts div { grid-template-columns: 1fr; gap: 0; }
   main.wrap { padding-bottom: 200px; }
   .actionbar { bottom: 8px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .actionbar .btn { padding: 8px 12px; }

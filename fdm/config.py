@@ -45,10 +45,11 @@ class Settings:
     rss_feeds: tuple[str, ...]
     results_per_query: int
     llm_concurrency: int
-    max_repairs: int
     # Facts the Pitch Writer may use about you. It never invents experience, so leaving these empty is safe.
     freelancer_name: str = ""
     freelancer_profile: str = ""
+    # OAuth token for placing bids through Freelancer.com's API (fdm.bids). Without one the portal never bids.
+    freelancer_oauth_token: str = ""
     # The portal server. It has no login, so keep it bound to localhost unless something else guards it.
     host: str = "127.0.0.1"
     port: int = 5000
@@ -67,9 +68,9 @@ class Settings:
             rss_feeds=_csv("FDM_RSS_FEEDS", ()),
             results_per_query=_int("FDM_RESULTS_PER_QUERY", 50),
             llm_concurrency=_int("FDM_LLM_CONCURRENCY", 2),
-            max_repairs=_int("FDM_MAX_REPAIRS", 2),
             freelancer_name=os.getenv("FDM_FREELANCER_NAME", "").strip(),
             freelancer_profile=os.getenv("FDM_FREELANCER_PROFILE", "").strip(),
+            freelancer_oauth_token=os.getenv("FREELANCER_OAUTH_TOKEN", "").strip(),
             host=os.getenv("FDM_HOST", "").strip() or "127.0.0.1",
             port=_int("FDM_PORT", 5000),
             shortlist_size=_int("FDM_SHORTLIST_SIZE", 10),

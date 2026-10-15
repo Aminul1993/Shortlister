@@ -16,12 +16,6 @@
       </div>
       <span class="pill pill-{{ item.state }}">{{ item.state }}</span>
     </div>
-    {% if item.screenshot %}
-    {% set shot_url = url_for('screenshot', name=item.screenshot, v=job.id) %}
-    <a class="shot" href="{{ shot_url }}" target="_blank" rel="noopener">
-      <img src="{{ shot_url }}" alt="Screenshot of the demo page for {{ item.title }}" loading="lazy">
-    </a>
-    {% endif %}
     {% if item.proposal %}
     <section class="proposal" aria-label="Proposal for {{ item.title }}">
       <div class="proposal-head">
@@ -37,15 +31,8 @@
     </section>
     {% endif %}
     <dl class="project-facts">
-      {% if item.used_fallback %}
-      <div><dt>Built by</dt><dd>Fallback page (agent output failed the checks)</dd></div>
-      {% elif item.model %}
-      <div><dt>Built by</dt><dd>{{ item.model }}</dd></div>
-      {% endif %}
-      {% if item.path %}
-      <div><dt>Screenshot</dt><dd>v{{ item.screenshot_version }}{% if job.mode == 'proposal' %} (existing){% endif %} · <code>{{ item.path }}</code></dd></div>
-      {% elif item.proposal_path %}
-      <div><dt>Screenshot</dt><dd>None. The proposal doesn't mention one, so send it on its own.</dd></div>
+      {% if item.model %}
+      <div><dt>Written by</dt><dd>{{ item.model }}</dd></div>
       {% endif %}
       {% if item.proposal_path %}
       <div><dt>Proposal</dt><dd>v{{ item.proposal_version }} · <a href="{{ url_for('proposal', name=item.proposal_file, v=job.id) }}" target="_blank" rel="noopener"><code>{{ item.proposal_path }}</code></a></dd></div>
@@ -53,14 +40,8 @@
       {% if item.error %}
       <div><dt>Error</dt><dd class="error-text">{{ item.error }}</dd></div>
       {% endif %}
-      <div><dt>Versions</dt><dd><a href="{{ url_for('demo', demo_id=item.demo_id) }}">Every screenshot and proposal of this gig</a></dd></div>
+      <div><dt>Versions</dt><dd><a href="{{ url_for('demo', demo_id=item.demo_id) }}">Every proposal of this gig, and its bid</a></dd></div>
     </dl>
-    {% if item.notes %}
-    <details>
-      <summary>Build notes ({{ item.notes|length }})</summary>
-      <ul>{% for note in item.notes %}<li>{{ note }}</li>{% endfor %}</ul>
-    </details>
-    {% endif %}
   </li>
   {% endfor %}
 </ol>

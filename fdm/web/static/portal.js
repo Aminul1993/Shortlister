@@ -21,18 +21,11 @@
     sync();
   }
 
-  // Long-running submits (refresh, create) show a busy label so they aren't clicked twice.
+  // Long-running submits (refresh, create, bid) show a busy label so they aren't clicked twice.
   document.querySelectorAll("form[data-busy-label]").forEach((busyForm) => {
     busyForm.addEventListener("submit", (event) => {
       const submit = event.submitter || busyForm.querySelector("button[type=submit]");
       if (!submit) return;
-      if (submit.name) {
-        // A disabled button is left out of the submitted form, so carry its value (the job mode) in a hidden field.
-        const field = Object.assign(document.createElement("input"), {
-          type: "hidden", name: submit.name, value: submit.value,
-        });
-        busyForm.append(field);
-      }
       busyForm.querySelectorAll("button[type=submit]").forEach((button) => { button.disabled = true; });
       submit.textContent = busyForm.dataset.busyLabel;
     });

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% set hourly = project.pay_type == 'hourly' %}
+{% set status = project.status|replace('_', ' ') %}
+{% block title %}Bid · {{ scored.gig.title }}{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <p class="crumb"><a href="{{ url_for('demo', demo_id=demo_id) }}">← Versions</a></p>
+    <h1>Place bid</h1>
+    <p class="muted">
+      {{ scored.gig.title }} · <a href="{{ scored.gig.url }}" target="_blank" rel="noopener noreferrer">View gig ↗</a>
+    </p>
+  </div>
+</section>
+
+{% if error %}<div class="flash flash-error" role="alert">{{ error }}</div>{% endif %}
+{% if placed %}
+{% set last = placed[-1] %}
+<div class="flash flash-warn">A bid on this gig was already placed from here{% if last.placed_at %} on
+  {{ last.placed_at.strftime('%d %b %Y, %H:%M') }}{% endif %} ({{ bid_amount(last) }}). Freelancer.com takes one bid
+  per project, so change it on the gig page.</div>
+{% elif not project.open %}
+<div class="flash flash-warn">This project is {{ status }} on Freelancer.com, so it no longer takes bids.</div>
+{% endif %}
+
+<dl class="facts">
+  <div><dt>Bidding as</dt><dd>{{ account.username }}</dd></div>
+  <div><dt>Project</dt><dd>{{ status }} · {{ project.pay_type }} price · {{ project.bid_count }} bid{{ 's' if project.bid_count != 1 }} so far
+    {%- if project.bid_avg %}, averaging {{ project.money(project.bid_avg) }}{% endif %}</dd></div>
+  <div><dt>Budget</dt><dd>
+    {%- if project.budget_max %}{{ project.money(project.budget_min or 0) }} to {{ project.money(project.budget_max) }}
+    {%- elif project.budget_min %}from {{ project.money(project.budget_min) }}
+    {%- else %}not given{% endif %}{% if hourly and (project.budget_min or project.budget_max) %} per hour{% endif %}</dd></div>
+  <div><dt>Proposal</dt><dd>v{{ proposal.number }}
+    {%- if suggested %} · suggested bid {{ suggested }}{% if project.currency != 'USD' %} (US dollars), converted to {{ project.currency }} below{% endif %}{% endif %}</dd></div>
+</dl>
+
+<form method="post" action="{{ url_for('bid', demo_id=demo_id) }}" class="bid-form" data-busy-label="Placing bid…">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  <div class="bid-fields">
+    <label>{{ 'Hourly rate' if hourly else 'Bid amount' }} ({{ project.currency }})
+      <input type="number" name="amount" value="{{ form.amount }}" min="0.01" step="any" required>
+    </label>
+    <label>Delivery (days)
+      <input type="number" name="period" value="{{ form.period }}" min="1" step="1" required>
+    </label>
+    <label>Upfront milestone (%)
+      <input type="number" name="milestone_percentage" value="{{ form.milestone_percentage }}" min="0" max="100" step="1" required>
+    </label>
+  </div>
+  {% if mentions_screenshot %}
+  <div class="flash flash-warn">Proposal v{{ proposal.number }} was written to go with a screenshot and may refer to it
+    as attached. Nothing is attached to a bid, so reword that part below, or write a new proposal.</div>
+  {% endif %}
+  <label>Proposal
+    <textarea name="description" rows="16" required>{{ form.description }}</textarea>
+  </label>
+  <div class="bid-actions">
+    <button class="btn btn-primary" type="submit" {% if placed or not project.open %}disabled{% endif %}>Place bid on Freelancer.com</button>
+    <a class="btn btn-secondary" href="{{ url_for('demo', demo_id=demo_id) }}">Cancel</a>
+    <span class="muted">Sends the bid as {{ account.username }}. Edits to the text go with this bid only and don't
+      change proposal v{{ proposal.number }}.</span>
+  </div>
+</form>
+{% endblock %}

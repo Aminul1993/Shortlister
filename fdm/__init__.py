@@ -1,1 +1,1 @@
-"""Shortlister: find easy gigs and screenshot a generated proof-of-concept page for each."""
+"""Shortlister: find easy gigs, draft a proposal for each, and place reviewed bids."""

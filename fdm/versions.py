@@ -1,10 +1,9 @@
-"""Saved versions of each gig's screenshot and proposal.
+"""Saved versions of each gig's proposal.
 
 Regenerating never overwrites: every run saves the next version beside the earlier ones. Version 1 keeps
-the plain name (screenshots/<demo_id>.png), so files saved before versioning count as version 1, and
-later versions add a suffix (screenshots/<demo_id>-v2.png). A JSON sidecar with the same stem records
-how each file was made: the design brief behind a screenshot, and which screenshot a proposal describes
-along with its suggested bid. Files saved before versioning have no sidecar.
+the plain name (proposals/<demo_id>.txt), so files saved before versioning count as version 1, and
+later versions add a suffix (proposals/<demo_id>-v2.txt). A JSON sidecar with the same stem records
+how each proposal was made, along with its suggested bid. Files saved before versioning have no sidecar.
 """
 
 from __future__ import annotations
@@ -15,9 +14,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-SCREENSHOT_DIR = "screenshots"
 PROPOSAL_DIR = "proposals"
-DEMO_ID = re.compile(r"[a-z0-9-]+")  # what pages.make_demo_id produces; also keeps globs and paths safe
+DEMO_ID = re.compile(r"[a-z0-9-]+")  # what store.make_demo_id produces; also keeps globs and paths safe
 
 
 @dataclass
@@ -62,29 +60,18 @@ def _save(folder: Path, demo_id: str, suffix: str, data: bytes, meta: dict) -> V
     return Version(number, path, datetime.now(), meta)
 
 
-def screenshots(output_dir: Path, demo_id: str) -> list[Version]:
-    """Every saved screenshot of this gig, oldest first."""
-    return _versions(output_dir / SCREENSHOT_DIR, demo_id, ".png")
-
-
 def proposals(output_dir: Path, demo_id: str) -> list[Version]:
     """Every saved proposal for this gig, oldest first."""
     return _versions(output_dir / PROPOSAL_DIR, demo_id, ".txt")
-
-
-def save_screenshot(output_dir: Path, demo_id: str, png: bytes, meta: dict) -> Version:
-    return _save(output_dir / SCREENSHOT_DIR, demo_id, ".png", png, meta)
 
 
 def save_proposal(output_dir: Path, demo_id: str, text: str, meta: dict) -> Version:
     return _save(output_dir / PROPOSAL_DIR, demo_id, ".txt", text.encode("utf-8"), meta)
 
 
-def described_screenshot(proposal: Version, shots: list[Version]) -> int | None:
-    """The screenshot version a proposal was written for, or None if that is unknown."""
-    if "screenshot_version" in proposal.meta:
-        return proposal.meta["screenshot_version"]
-    # Saved before versioning, when a proposal was always written with the screenshot of the same name.
-    if not proposal.meta and shots and shots[0].number == 1 and not shots[0].meta:
-        return 1
-    return None
+def mentions_screenshot(proposal: Version) -> bool:
+    """Whether the proposal was written to go with a screenshot, which Shortlister used to make.
+
+    Proposals saved before versioning always were; later ones record the screenshot version, or None.
+    """
+    return bool(proposal.meta.get("screenshot_version")) or not proposal.meta

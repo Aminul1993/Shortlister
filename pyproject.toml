@@ -1,7 +1,7 @@
 [project]
 name = "freelance-demo-machine"
 version = "0.1.0"
-description = "Find easy freelance web gigs and screenshot proof-of-concept pages written by Ollama Cloud agents."
+description = "Find easy freelance web gigs, draft proposals with Ollama Cloud, and bid on Freelancer.com."
 requires-python = ">=3.11"
 
 [tool.pytest.ini_options]

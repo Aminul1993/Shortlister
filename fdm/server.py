@@ -33,7 +33,8 @@ def main() -> int:
 
     if settings.host not in {"127.0.0.1", "localhost", "::1"}:
         log.warning("Listening on %s: the portal has no login, so anyone who can reach it can spend your "
-                    "Ollama tokens. Keep FDM_HOST=127.0.0.1 unless something else guards it.", settings.host)
+                    "Ollama tokens%s. Keep FDM_HOST=127.0.0.1 unless something else guards it.", settings.host,
+                    " and place bids as you" if settings.freelancer_oauth_token else "")
     log.info("Shortlister portal: http://%s:%s  (Ctrl+C to stop)", settings.host, settings.port)
     serve(create_app(settings), host=settings.host, port=settings.port, threads=THREADS)
     return 0

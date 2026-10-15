@@ -11,35 +11,62 @@
       #{{ rank }} · {{ scored.gig.platform }} · score {{ '%.1f'|format(scored.score) }}
       · <a href="{{ scored.gig.url }}" target="_blank" rel="noopener noreferrer">View gig ↗</a>
       {% else %}No longer on the shortlist{% endif %}
-      · {{ shots|length }} screenshot{{ 's' if shots|length != 1 }}, {{ proposals|length }} proposal{{ 's' if proposals|length != 1 }}
+      · {{ proposals|length }} proposal{{ 's' if proposals|length != 1 }}
     </p>
   </div>
   {% if scored %}
   <form method="post" action="{{ url_for('create_job') }}" class="regen" data-busy-label="Starting…">
     <input type="hidden" name="csrf" value="{{ csrf_token() }}">
     <input type="hidden" name="gig" value="{{ key }}">
-    <button class="btn btn-secondary" type="submit" name="mode" value="screenshot"
-            {% if not can_generate %}disabled{% endif %}>New screenshot</button>
-    <button class="btn btn-secondary" type="submit" name="mode" value="proposal"
-            {% if not can_generate %}disabled{% endif %}>New proposal</button>
-    <button class="btn btn-primary" type="submit" name="mode" value="both"
-            {% if not can_generate %}disabled{% endif %}>New screenshot &amp; proposal</button>
+    <button class="btn {{ 'btn-secondary' if proposals else 'btn-primary' }}" type="submit" {% if not can_generate %}disabled{% endif %}>New proposal</button>
   </form>
   {% endif %}
 </section>
 
 {% if not scored %}
-<div class="flash flash-message">This gig is no longer on the shortlist, so no new versions can be made. Its saved files are below.</div>
+<div class="flash flash-message">This gig is no longer on the shortlist, so no new proposals can be written. Its saved files are below.</div>
 {% elif not can_generate %}
-<div class="flash flash-warn">Set <code>OLLAMA_API_KEY</code> in <code>.env</code> and restart the portal to make new versions.</div>
-{% elif not latest_shot %}
-<div class="flash flash-message">There is no screenshot yet, so a new proposal won't mention one. To pitch with a
-  screenshot, make a new screenshot &amp; proposal.</div>
-{% elif not shot_has_brief %}
-<div class="flash flash-message">Screenshot v{{ latest_shot.number }} was saved before design briefs were kept, so a
-  new proposal won't mention it. To pitch with a screenshot, make a new screenshot &amp; proposal.</div>
+<div class="flash flash-warn">Set <code>OLLAMA_API_KEY</code> in <code>.env</code> and restart the portal to write new proposals.</div>
 {% endif %}
-<p class="muted">Each new screenshot or proposal is saved as the next version. Older versions are kept.</p>
+<p class="muted">Each new proposal is saved as the next version. Older versions are kept.</p>
+
+{% if biddable or placed %}
+<h2 id="bids">Bid on Freelancer.com</h2>
+{% if placed %}
+<ol class="versions">
+  {% for b in placed %}
+  <li class="version">
+    <div class="version-head">
+      <h3>Bid placed</h3>
+      <span class="muted">
+        {% if b.placed_at %}{{ b.placed_at.strftime('%d %b %Y, %H:%M') }} · {% endif %}{{ bid_amount(b) }}
+        {% if b.period %} · {{ b.period }} day{{ 's' if b.period != 1 }}{% endif %}
+        {% if b.milestone_percentage is not none %} · {{ '%g'|format(b.milestone_percentage) }}% upfront{% endif %}
+        {% if b.proposal_version %} · from proposal v{{ b.proposal_version }}{% endif %}
+        {% if b.bidder %} · as {{ b.bidder }}{% endif %}
+      </span>
+    </div>
+    {% if b.description %}
+    <details>
+      <summary>Text sent</summary>
+      <p class="proposal-text">{{ b.description }}</p>
+    </details>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ol>
+{% elif not can_bid %}
+<p class="muted">Set <code>FREELANCER_OAUTH_TOKEN</code> in <code>.env</code> and restart the portal to place bids from here.</p>
+{% elif not proposals %}
+<p class="muted">Write a proposal first. The bid is placed with it.</p>
+{% else %}
+<p class="bid-cta">
+  <a class="btn btn-primary" href="{{ url_for('bid_form', demo_id=demo_id) }}">Review &amp; place bid</a>
+  <span class="muted">Opens proposal v{{ proposals[0].version.number }} and the live project in a form. Nothing is sent
+    until you submit it.</span>
+</p>
+{% endif %}
+{% endif %}
 
 <h2 id="proposals">Proposals</h2>
 {% if proposals %}
@@ -51,22 +78,11 @@
       {% if loop.first %}<span class="pill pill-latest">latest</span>{% endif %}
       <span class="muted">
         {{ p.version.saved_at.strftime('%d %b %Y, %H:%M') }} · {{ p.text|wordcount }} words
-        {% if p.for_screenshot %} · for screenshot v{{ p.for_screenshot }}{% elif p.text_only %} · no screenshot{% endif %}
         {% if p.bid %} · suggested bid {{ p.bid }}{% endif %}
         {% if p.delivery_days %} · {{ p.delivery_days }} day{{ 's' if p.delivery_days != 1 }}{% endif %}
       </span>
       <button type="button" class="btn btn-secondary btn-small" data-copy="proposal-v{{ p.version.number }}">Copy</button>
     </div>
-    {% if loop.first and p.text_only and shot_has_brief %}
-    <p class="warn-text">
-      Written without a screenshot, so it doesn't mention one. Make a new proposal to pitch with screenshot v{{ latest_shot.number }}.
-    </p>
-    {% elif loop.first and latest_shot and not p.text_only and p.for_screenshot != latest_shot.number %}
-    <p class="warn-text">
-      Written for {% if p.for_screenshot %}screenshot v{{ p.for_screenshot }}{% else %}an earlier screenshot{% endif %},
-      not the latest one (v{{ latest_shot.number }}). Make a new proposal to describe the latest screenshot.
-    </p>
-    {% endif %}
     <p class="proposal-text" id="proposal-v{{ p.version.number }}">{{ p.text }}</p>
     <p class="file"><a href="{{ url_for('proposal', name=p.version.path.name) }}" target="_blank" rel="noopener"><code>{{ p.version.path }}</code></a></p>
   </li>
@@ -74,37 +90,5 @@
 </ol>
 {% else %}
 <p class="muted">No proposals yet.</p>
-{% endif %}
-
-<h2 id="screenshots">Screenshots</h2>
-{% if shots %}
-<ol class="versions">
-  {% for s in shots %}
-  {% set shot_url = url_for('screenshot', name=s.path.name, v=s.saved_at.timestamp()|int) %}
-  <li class="version">
-    <div class="version-head">
-      <h3>Screenshot v{{ s.number }}</h3>
-      {% if loop.first %}<span class="pill pill-latest">latest</span>{% endif %}
-      <span class="muted">
-        {{ s.saved_at.strftime('%d %b %Y, %H:%M') }}
-        {% if s.meta.used_fallback %} · fallback page (agent output failed the checks)
-        {% elif s.meta.model %} · built by {{ s.meta.model }}{% endif %}
-      </span>
-    </div>
-    <a class="shot" href="{{ shot_url }}" target="_blank" rel="noopener">
-      <img src="{{ shot_url }}" alt="Screenshot v{{ s.number }} of the demo page" loading="lazy">
-    </a>
-    <p class="file"><code>{{ s.path }}</code></p>
-    {% if s.meta.notes %}
-    <details>
-      <summary>Build notes ({{ s.meta.notes|length }})</summary>
-      <ul>{% for note in s.meta.notes %}<li>{{ note }}</li>{% endfor %}</ul>
-    </details>
-    {% endif %}
-  </li>
-  {% endfor %}
-</ol>
-{% else %}
-<p class="muted">No screenshots yet.</p>
 {% endif %}
 {% endblock %}

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 from dataclasses import asdict, fields
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +19,13 @@ _GIG_FIELDS = {f.name for f in fields(Gig)}
 def gig_key(gig: Gig) -> str:
     """Stable identity for a gig across shortlist refreshes (ranks shift, ids don't)."""
     return f"{gig.platform}:{gig.gig_id}"
+
+
+def make_demo_id(gig: Gig) -> str:
+    """Lowercase, hyphenated and unique per gig; names the gig's saved files (proposals, bids)."""
+    slug = re.sub(r"[^a-z0-9]+", "-", gig.title.lower()).strip("-")[:40].strip("-") or "demo"
+    suffix = re.sub(r"[^a-z0-9]", "", gig.gig_id.lower())[-8:] or hashlib.sha1(gig.url.encode()).hexdigest()[:8]
+    return f"{slug}-{suffix}"
 
 
 def write_json(path: Path, data: object) -> None:

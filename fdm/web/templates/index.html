@@ -15,7 +15,7 @@
 </section>
 
 {% if not can_generate %}
-<div class="flash flash-warn">Set <code>OLLAMA_API_KEY</code> in <code>.env</code> and restart the portal to create screenshots.</div>
+<div class="flash flash-warn">Set <code>OLLAMA_API_KEY</code> in <code>.env</code> and restart the portal to write proposals.</div>
 {% endif %}
 
 {% if rows %}
@@ -40,8 +40,10 @@
             {% if gig.budget_max_usd %} · up to ${{ '{:,.0f}'.format(gig.budget_max_usd) }}{% endif %}
             {% if gig.pay_type and gig.pay_type != 'unknown' %} · {{ gig.pay_type }}{% endif %}
             · <a href="{{ gig.url }}" target="_blank" rel="noopener noreferrer">View gig ↗</a>
-            {% if row.screenshot %}<a class="tag" href="{{ url_for('demo', demo_id=row.demo_id) }}#screenshots">screenshot v{{ row.screenshot }}</a>{% endif %}
             {% if row.proposal %}<a class="tag" href="{{ url_for('demo', demo_id=row.demo_id) }}#proposals">proposal v{{ row.proposal }}</a>{% endif %}
+            {% if row.placed %}<a class="tag tag-placed" href="{{ url_for('demo', demo_id=row.demo_id) }}#bids">bid placed · {{ bid_amount(row.placed) }}</a>
+            {% elif row.bid %}<a class="tag tag-bid" href="{{ url_for('demo', demo_id=row.demo_id) }}#proposals"
+               title="Suggested with proposal v{{ row.proposal }}">bid {{ row.bid }}{% if row.delivery_days %} · {{ row.delivery_days }} day{{ 's' if row.delivery_days != 1 }}{% endif %}</a>{% endif %}
           </span>
           <span class="gig-brief">{{ gig.description }}</span>
           {% if row.item.signals %}
@@ -64,13 +66,8 @@
   <div class="actionbar">
     <span id="selected-count">0 selected</span>
     <span class="muted actionbar-hint">New versions are added; older ones are kept.</span>
-    <button class="btn btn-secondary" type="submit" name="mode" value="screenshot" disabled
-            {% if not can_generate %}data-locked="1"{% endif %}>Screenshot only</button>
-    <button class="btn btn-secondary" type="submit" name="mode" value="proposal" disabled
-            title="Writes a proposal for each gig's latest screenshot, or one that mentions no screenshot if a gig has none"
-            {% if not can_generate %}data-locked="1"{% endif %}>Proposal only</button>
-    <button class="btn btn-primary" type="submit" name="mode" value="both" disabled
-            {% if not can_generate %}data-locked="1"{% endif %}>Create screenshots &amp; proposals</button>
+    <button class="btn btn-primary" type="submit" disabled
+            {% if not can_generate %}data-locked="1"{% endif %}>Write proposals</button>
   </div>
 </form>
 {% else %}
@@ -87,7 +84,7 @@
   <ul>
     {% for job in jobs %}
     <li>
-      <a href="{{ url_for('job_detail', job_id=job.id) }}">{{ job.created_at.strftime('%H:%M:%S') }} · {{ job.items|length }} gig{{ 's' if job.items|length != 1 }} · {{ job.mode_label|lower }}</a>
+      <a href="{{ url_for('job_detail', job_id=job.id) }}">{{ job.created_at.strftime('%H:%M:%S') }} · {{ job.items|length }} proposal{{ 's' if job.items|length != 1 }}</a>
       <span class="pill pill-{{ job.state }}">{{ job.state }}</span>
     </li>
     {% endfor %}

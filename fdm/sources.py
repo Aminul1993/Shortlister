@@ -2,7 +2,7 @@
 
 Only public, unauthenticated endpoints are used: the Freelancer.com projects API
 and any RSS/Atom feeds listed in FDM_RSS_FEEDS. No browser is launched, so
-`playwright install` is not needed for this step.
+`playwright install` is not needed.
 """
 
 from __future__ import annotations
