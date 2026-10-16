@@ -4,25 +4,32 @@ every saved version, and place a reviewed bid on Freelancer.com."""
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
 import os
 import secrets
 import threading
+from urllib.parse import urlsplit
 
 from flask import Flask, abort, flash, redirect, render_template, request, send_from_directory, session, url_for
 
 from ..bids import PLATFORM as BID_PLATFORM
-from ..bids import BidError, bid_amount, lookup, place_bid, placed_bids, save_bid
+from ..bids import BidError, BidLogError, bid_amount, lookup, place_bid, placed_bids, save_bid
 from ..config import Settings
 from ..models import ScoredGig
 from ..ranking import rank_gigs
 from ..sources import fetch_gigs
 from ..store import gig_key, load_shortlist, make_demo_id, save_shortlist, shortlist_updated_at
-from ..versions import DEMO_ID, PROPOSAL_DIR, Version, mentions_screenshot, proposals
+from ..versions import DEMO_ID, PROPOSAL_DIR, Version, mentions_screenshot, proposals, saved_gig
 from .jobs import JobManager, bid_label
 
 log = logging.getLogger(__name__)
+
+# The pages load only their own script and stylesheet. Inline styles are allowed for the score bars. Another site
+# must not frame the bid form and click it through, and a javascript: link must not run in the portal's origin.
+CSP = ("default-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; form-action 'self'; "
+       "base-uri 'none'; object-src 'none'")
 
 
 def can_bid_on(scored: ScoredGig) -> bool:
@@ -53,7 +60,10 @@ def read_bid_form(form) -> tuple[dict, dict | None, str | None]:
 def create_app(settings: Settings | None = None) -> Flask:
     settings = settings or Settings.load()
     app = Flask(__name__)
-    app.config["SECRET_KEY"] = os.getenv("FDM_PORTAL_SECRET") or secrets.token_hex(32)
+    app.config.update(
+        SECRET_KEY=os.getenv("FDM_PORTAL_SECRET") or secrets.token_hex(32),
+        SESSION_COOKIE_SAMESITE="Lax",  # keeps the form-token session off cross-site POSTs and framed pages
+    )
     jobs = JobManager(settings)
     app.extensions["fdm_jobs"] = jobs
 
@@ -66,10 +76,27 @@ def create_app(settings: Settings | None = None) -> Flask:
     app.jinja_env.globals["bid_amount"] = bid_amount
     # Held from the duplicate check until the bid is recorded, so a double submit can't send two bids.
     bid_lock = threading.Lock()
+    # Gigs bid on whose bid couldn't be recorded. Their log can't show the bid, so this guards them until restart.
+    unrecorded: set[str] = set()
 
-    def shortlisted(demo_id: str) -> tuple[int, ScoredGig] | None:
-        return next(((rank, s) for rank, s in enumerate(load_shortlist(settings.output_dir), 1)
-                     if make_demo_id(s.gig) == demo_id), None)
+    def find_gig(demo_id: str) -> tuple[int | None, ScoredGig] | None:
+        """The gig's shortlist rank and data. Once a refresh drops it, (None, the gig as saved with its newest
+        proposal), so it can still get new proposals and a bid. None if neither exists."""
+        if not DEMO_ID.fullmatch(demo_id):
+            return None
+        entry = next(((rank, s) for rank, s in enumerate(load_shortlist(settings.output_dir), 1)
+                      if make_demo_id(s.gig) == demo_id), None)
+        if entry is None and (snapshot := saved_gig(settings.output_dir, demo_id)):
+            entry = None, snapshot
+        return entry
+
+    @app.before_request
+    def check_host():
+        # DNS rebinding: a page on another domain that re-resolves to this machine is same-origin with whatever
+        # answers it. It must not get the portal's pages, and with them a form token that places bids.
+        if urlsplit(f"//{request.host}").hostname not in settings.trusted_hosts:
+            abort(400, f"This portal doesn't answer to {request.host}. If that is how you open it, add the name "
+                       "to FDM_TRUSTED_HOSTS and restart the portal.")
 
     @app.before_request
     def check_csrf():
@@ -78,6 +105,14 @@ def create_app(settings: Settings | None = None) -> Flask:
             sent = request.form.get("csrf", "")
             if not sent or not secrets.compare_digest(sent, session.get("csrf", "")):
                 abort(400, "Missing or expired form token. Reload the page and try again.")
+
+    @app.after_request
+    def security_headers(response):
+        response.headers.setdefault("Content-Security-Policy", CSP)
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "same-origin")
+        return response
 
     @app.get("/")
     def index():
@@ -132,12 +167,23 @@ def create_app(settings: Settings | None = None) -> Flask:
         job_id = jobs.submit(chosen)
         return redirect(url_for("job_detail", job_id=job_id))
 
+    @app.post("/demos/<demo_id>/proposals")
+    def new_proposal(demo_id: str):
+        """Write the gig's next proposal, whether or not it is still on the shortlist."""
+        entry = find_gig(demo_id)
+        if entry is None:
+            abort(404)
+        if not settings.ollama_api_key:
+            flash("Set OLLAMA_API_KEY in .env and restart the portal before writing proposals.", "error")
+            return redirect(url_for("demo", demo_id=demo_id))
+        return redirect(url_for("job_detail", job_id=jobs.submit([entry])))
+
     @app.get("/demos/<demo_id>")
     def demo(demo_id: str):
         """Every saved proposal of one gig, newest first, the bids placed on it, and a button to write a new one."""
         if not DEMO_ID.fullmatch(demo_id):
             abort(404)
-        entry = shortlisted(demo_id)
+        entry = find_gig(demo_id)
         texts = proposals(settings.output_dir, demo_id)
         placed = placed_bids(settings.output_dir, demo_id)
         if entry is None and not texts and not placed:
@@ -157,7 +203,6 @@ def create_app(settings: Settings | None = None) -> Flask:
             demo_id=demo_id,
             rank=entry[0] if entry else None,
             scored=entry[1] if entry else None,
-            key=gig_key(entry[1].gig) if entry else None,
             proposals=written[::-1],
             can_generate=bool(settings.ollama_api_key),
             biddable=bool(entry and can_bid_on(entry[1])),
@@ -167,7 +212,7 @@ def create_app(settings: Settings | None = None) -> Flask:
 
     def bid_target(demo_id: str) -> tuple[ScoredGig, Version]:
         """The gig and the proposal a bid would send, or a redirect saying why there is nothing to bid with."""
-        entry = shortlisted(demo_id) if DEMO_ID.fullmatch(demo_id) else None
+        entry = find_gig(demo_id)
         if entry is None or not can_bid_on(entry[1]):
             abort(404)
         texts = proposals(settings.output_dir, demo_id)
@@ -189,6 +234,10 @@ def create_app(settings: Settings | None = None) -> Flask:
                 flash(error, "error")
             flash(str(exc), "error")
             return redirect(url_for("demo", demo_id=demo_id))
+        try:
+            placed = placed_bids(settings.output_dir, demo_id, strict=True)
+        except BidLogError as exc:  # say so now, rather than after the form is filled in
+            placed, error = [], error or str(exc)
         meta = proposal.meta
         if typed is None:
             try:
@@ -209,7 +258,7 @@ def create_app(settings: Settings | None = None) -> Flask:
             mentions_screenshot=mentions_screenshot(proposal),
             account=account,
             project=project,
-            placed=placed_bids(settings.output_dir, demo_id),
+            placed=placed,
             form=typed,
             error=error,
         )
@@ -224,7 +273,11 @@ def create_app(settings: Settings | None = None) -> Flask:
         scored, proposal = bid_target(demo_id)
         typed, values, error = read_bid_form(request.form)
         with bid_lock:
-            if placed_bids(settings.output_dir, demo_id):
+            try:
+                already = placed_bids(settings.output_dir, demo_id, strict=True)
+            except BidLogError as exc:
+                already, error = [], str(exc)
+            if already or demo_id in unrecorded:
                 flash("A bid on this gig has already been placed. Freelancer.com takes one bid per project, so "
                       "change it on the gig page.", "error")
                 return redirect(url_for("demo", demo_id=demo_id))
@@ -235,7 +288,16 @@ def create_app(settings: Settings | None = None) -> Flask:
                     error = str(exc)
                 else:
                     record.update(proposal_version=proposal.number, description=values["description"])
-                    save_bid(settings.output_dir, demo_id, record)
+                    try:
+                        save_bid(settings.output_dir, demo_id, record)
+                    except Exception:  # the bid is placed: an error page now would also lose what was sent
+                        unrecorded.add(demo_id)
+                        log.exception("Bid placed but not recorded for %s: %s", demo_id,
+                                      json.dumps(record, ensure_ascii=False, default=str))
+                        flash(f"The bid was placed on Freelancer.com ({bid_amount(record)}), but it could not be "
+                              "recorded here. The portal's log has the text that was sent. Don't place it again: "
+                              "Freelancer.com takes one bid per project.", "error")
+                        return redirect(url_for("demo", demo_id=demo_id))
         if error:  # shown above the form, with the edits kept
             return bid_page(demo_id, scored, proposal, typed, error)
         days = record["period"]

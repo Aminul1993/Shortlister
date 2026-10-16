@@ -7,6 +7,7 @@ Each run saves the proposal as the gig's next version in output/proposals/, besi
 from __future__ import annotations
 
 import logging
+from dataclasses import asdict
 
 from .agents import run_pitch_writer
 from .config import Settings
@@ -30,6 +31,8 @@ async def generate_proposal(llm: OllamaCloud, scored: ScoredGig, settings: Setti
                                           freelancer_profile=settings.freelancer_profile)
     saved = save_proposal(settings.output_dir, demo_id, pitch.message + "\n", {
         "model": model, "bid_usd": pitch.bid_usd, "pay_type": gig.pay_type, "delivery_days": pitch.delivery_days,
+        # A snapshot, so the gig can still get proposals and a bid after a refresh drops it from the shortlist.
+        "score": scored.score, "gig": asdict(gig),
     })
     log.info("[%s] Saved %s", demo_id, saved.path)
     return Proposal(demo_id, scored, pitch, model, saved.path, saved.number)

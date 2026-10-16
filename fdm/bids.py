@@ -1,4 +1,4 @@
-"""Place bids on Freelancer.com with its official SDK, freelancersdk.
+"""Place bids on Freelancer.com through its API (see fdm.freelancer).
 
 A bid is the one step that acts on your behalf, so nothing here runs on its own. The portal first looks the
 project up live (still open? which currency and budget?) and shows the bid in a form you can edit. Only
@@ -9,32 +9,31 @@ Freelancer's bid API takes text only, so nothing can be attached to a bid.
 
 from __future__ import annotations
 
-import functools
 import json
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-import requests
-from freelancersdk.resources.projects import get_project_by_id, place_project_bid
-from freelancersdk.resources.projects.exceptions import BidNotPlacedException, ProjectsNotFoundException
-from freelancersdk.resources.users import get_self
-from freelancersdk.resources.users.exceptions import SelfNotRetrievedException
-from freelancersdk.session import Session
+import httpx
 
+from .freelancer import APIError, Freelancer
 from .store import write_json
 
 log = logging.getLogger(__name__)
 
 BID_DIR = "bids"
 PLATFORM = "Freelancer.com"  # the Gig.platform this module can bid on; its gig_id is the project id
-# The SDK sets no timeout, so a stalled request would hold one of the portal's threads indefinitely.
-TIMEOUT_SECONDS = 30
 
 
 class BidError(Exception):
     """Freelancer.com could not be reached or refused the request. The message names the step that failed."""
+
+
+class BidLogError(BidError):
+    """A bid log exists but can't be read, so whether a bid was already placed is unknown."""
 
 
 @dataclass(frozen=True)
@@ -108,53 +107,54 @@ def parse_project(data: dict) -> Project:
     )
 
 
-def _session(token: str) -> Session:
-    session = Session(oauth_token=token)
-    session.session.request = functools.partial(session.session.request, timeout=TIMEOUT_SECONDS)
-    return session
+@contextmanager
+def _step(name: str, if_unsure: str = "") -> Iterator[None]:
+    """Turn a failed call, or a reply without the fields read here, into a BidError that names the step.
 
-
-def _call(step: str, fn, *args, **kwargs):
-    """Run one SDK call, turning its failure modes into a BidError that says which step failed and why."""
+    `if_unsure` is added to the message when Freelancer.com may have acted on the call anyway.
+    """
     try:
-        return fn(*args, **kwargs)
-    except (SelfNotRetrievedException, ProjectsNotFoundException, BidNotPlacedException) as exc:
-        log.warning("%s failed: %s (%s, request %s)", step, exc, exc.error_code, exc.request_id)
-        raise BidError(f"{step} failed: {exc}") from exc
-    except (ValueError, KeyError, TypeError) as exc:  # a reply that isn't the JSON the SDK expects
-        log.warning("%s failed: unexpected reply (%r)", step, exc)
-        raise BidError(f"{step} failed: Freelancer.com sent an unexpected reply.") from exc
-    except requests.RequestException as exc:
-        raise BidError(f"{step} failed: could not reach Freelancer.com ({exc}).") from exc
+        yield
+    except APIError as exc:
+        note = f" {if_unsure}" if exc.unsure and if_unsure else ""
+        raise BidError(f"{name} failed: {exc}{note}") from exc
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        log.warning("%s failed: unexpected reply (%r)", name, exc)
+        raise BidError(f"{name} failed: Freelancer.com sent an unexpected reply.") from exc
 
 
-def _account(session: Session) -> Account:
-    me = _call("Checking your Freelancer.com account", get_self, session)
-    return Account(int(me["id"]), me.get("username") or str(me["id"]))
+def _account(api: Freelancer) -> Account:
+    with _step("Checking your Freelancer.com account"):
+        me = api.get_self()
+        return Account(int(me["id"]), me.get("username") or str(me["id"]))
 
 
-def _project(session: Session, project_id: int) -> Project:
-    return parse_project(_call("Looking up the project", get_project_by_id, session, project_id))
+def _project(api: Freelancer, project_id: int) -> Project:
+    with _step("Looking up the project"):
+        return parse_project(api.get_project(project_id))
 
 
-def lookup(token: str, project_id: int) -> tuple[Account, Project]:
+def lookup(token: str, project_id: int, *, transport: httpx.BaseTransport | None = None) -> tuple[Account, Project]:
     """The account a bid would come from and the project's live state. Places nothing."""
-    session = _session(token)
-    return _account(session), _project(session, project_id)
+    with Freelancer(token, transport) as api:
+        return _account(api), _project(api, project_id)
 
 
 def place_bid(token: str, project_id: int, amount: float, period: int, milestone_percentage: int,
-              description: str) -> dict:
+              description: str, *, transport: httpx.BaseTransport | None = None) -> dict:
     """Place one bid exactly as reviewed. Returns the record to keep; raises BidError if nothing was placed."""
-    session = _session(token)
-    account, project = _account(session), _project(session, project_id)
-    if not project.open:
-        raise BidError(f"The project is {project.status} on Freelancer.com, so it no longer takes bids.")
-    bid = _call("Placing the bid", place_project_bid, session, project_id=project_id, bidder_id=account.user_id,
-                description=description, amount=amount, period=period, milestone_percentage=milestone_percentage)
-    log.info("Placed bid %s on project %s: %s", getattr(bid, "id", "?"), project_id, project.money(amount))
+    with Freelancer(token, transport) as api:
+        account, project = _account(api), _project(api, project_id)
+        if not project.open:
+            raise BidError(f"The project is {project.status} on Freelancer.com, so it no longer takes bids.")
+        # Only the call itself: once it returns, the bid is placed.
+        with _step("Placing the bid", if_unsure="It may have been placed anyway, so check the project on "
+                                                "Freelancer.com before you try again."):
+            bid = api.place_bid(project_id=project_id, bidder_id=account.user_id, description=description,
+                                amount=amount, period=period, milestone_percentage=milestone_percentage)
+    log.info("Placed bid %s on project %s: %s", bid.get("id", "?"), project_id, project.money(amount))
     return {
-        "bid_id": getattr(bid, "id", None),
+        "bid_id": bid.get("id"),
         "project_id": project_id,
         "bidder": account.username,
         "amount": amount,
@@ -167,13 +167,32 @@ def place_bid(token: str, project_id: int, amount: float, period: int, milestone
     }
 
 
-def placed_bids(output_dir: Path, demo_id: str) -> list[dict]:
-    """Every bid placed on this gig from the portal, oldest first. `placed_at` is a datetime (or None)."""
+def _read_log(output_dir: Path, demo_id: str, strict: bool) -> list[dict]:
+    """The bid log's records as saved. One that exists but can't be read is [], or BidLogError if strict."""
+    path = output_dir / BID_DIR / f"{demo_id}.json"
     try:
-        rows = json.loads((output_dir / BID_DIR / f"{demo_id}.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        rows = json.loads(path.read_text(encoding="utf-8"))
+        # Strict readers rewrite the log, so a row they can't read must stop them rather than be dropped.
+        if not isinstance(rows, list) or (strict and not all(isinstance(row, dict) for row in rows)):
+            raise ValueError("expected a list of bid records")
+    except FileNotFoundError:
         return []
-    bids = [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+    except (OSError, ValueError) as exc:
+        log.error("Cannot read the bid log %s: %s", path, exc)
+        if strict:  # never bid, or rewrite the log, on the guess that there was no bid
+            raise BidLogError(f"{path} cannot be read, so the portal can't tell whether a bid was already placed. "
+                              "Fix or move that file, then try again.") from exc
+        return []
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def placed_bids(output_dir: Path, demo_id: str, *, strict: bool = False) -> list[dict]:
+    """Every bid placed on this gig from the portal, oldest first. `placed_at` is a datetime (or None).
+
+    A log that can't be read counts as no bids, which is fine for display. Before bidding, pass strict=True to
+    get BidLogError instead.
+    """
+    bids = _read_log(output_dir, demo_id, strict)
     for row in bids:
         try:
             row["placed_at"] = datetime.fromisoformat(row["placed_at"])
@@ -183,4 +202,5 @@ def placed_bids(output_dir: Path, demo_id: str) -> list[dict]:
 
 
 def save_bid(output_dir: Path, demo_id: str, record: dict) -> None:
-    write_json(output_dir / BID_DIR / f"{demo_id}.json", [*placed_bids(output_dir, demo_id), record])
+    """Add a placed bid to the gig's log. Raises BidLogError, leaving the log as it is, if it can't be read."""
+    write_json(output_dir / BID_DIR / f"{demo_id}.json", [*_read_log(output_dir, demo_id, strict=True), record])

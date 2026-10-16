@@ -3,7 +3,8 @@
 Regenerating never overwrites: every run saves the next version beside the earlier ones. Version 1 keeps
 the plain name (proposals/<demo_id>.txt), so files saved before versioning count as version 1, and
 later versions add a suffix (proposals/<demo_id>-v2.txt). A JSON sidecar with the same stem records
-how each proposal was made, along with its suggested bid. Files saved before versioning have no sidecar.
+how each proposal was made, along with its suggested bid and the gig as it was then. Files saved before
+versioning have no sidecar, and sidecars saved before gig snapshots have no "gig".
 """
 
 from __future__ import annotations
@@ -13,6 +14,9 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+
+from .models import ScoredGig
+from .store import gig_from_dict, make_demo_id, write_bytes, write_json
 
 PROPOSAL_DIR = "proposals"
 DEMO_ID = re.compile(r"[a-z0-9-]+")  # what store.make_demo_id produces; also keeps globs and paths safe
@@ -55,14 +59,28 @@ def _save(folder: Path, demo_id: str, suffix: str, data: bytes, meta: dict) -> V
     number = existing[-1].number + 1 if existing else 1
     path = folder / f"{demo_id if number == 1 else f'{demo_id}-v{number}'}{suffix}"
     # The sidecar goes first, so anyone who finds the file can also read how it was made.
-    path.with_suffix(".json").write_text(json.dumps(meta, indent=2, default=str), encoding="utf-8")
-    path.write_bytes(data)
+    write_json(path.with_suffix(".json"), meta)
+    write_bytes(path, data)
     return Version(number, path, datetime.now(), meta)
 
 
 def proposals(output_dir: Path, demo_id: str) -> list[Version]:
     """Every saved proposal for this gig, oldest first."""
     return _versions(output_dir / PROPOSAL_DIR, demo_id, ".txt")
+
+
+def saved_gig(output_dir: Path, demo_id: str) -> ScoredGig | None:
+    """The gig as it was when its newest proposal was written, so it can still be worked on after a refresh
+    drops it from the shortlist. None if no proposal of it was saved with a snapshot."""
+    for version in reversed(proposals(output_dir, demo_id)):
+        try:
+            gig = gig_from_dict(version.meta["gig"])
+            score = float(version.meta.get("score") or 0)
+            if make_demo_id(gig) == demo_id:  # the snapshot is of this gig, so a bid goes to the right project
+                return ScoredGig(gig, score, breakdown={}, signals=[])
+        except (AttributeError, KeyError, TypeError, ValueError):
+            continue  # saved before snapshots, or edited by hand
+    return None
 
 
 def save_proposal(output_dir: Path, demo_id: str, text: str, meta: dict) -> Version:

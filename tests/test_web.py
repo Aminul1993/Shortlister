@@ -1,6 +1,7 @@
 import re
+import threading
 import time
-from dataclasses import replace
+from dataclasses import asdict, replace
 from types import SimpleNamespace
 
 import pytest
@@ -177,7 +178,7 @@ def test_demo_page_lists_every_proposal_newest_first(client, settings):
     assert "Bakery landing page" in page and "2 proposals" in page and "creenshot" not in page
     assert page.index("Proposal v2") < page.index("Second pitch") < page.index("Proposal v1") < page.index("First pitch")
     assert "suggested bid ~$90" in page and "3 days" in page
-    assert f'name="gig" value="{gig_key(SHORTLIST[0].gig)}"' in page
+    assert f'action="/demos/{demo_id}/proposals"' in page
     assert re.search(r'type="submit" >New proposal</button>', page)  # enabled
 
     assert client.get("/demos/no-such-gig").status_code == 404
@@ -324,3 +325,135 @@ def test_bidding_needs_a_token_a_proposal_and_a_freelancer_gig(client, settings)
     save_shortlist([feed], settings.output_dir)
     assert with_token.get(f"/demos/{make_demo_id(feed.gig)}/bid").status_code == 404
     assert "Bid on Freelancer.com" not in with_token.get(f"/demos/{make_demo_id(feed.gig)}").get_data(as_text=True)
+
+
+def test_other_host_names_are_refused(client):
+    # DNS rebinding: a page on another domain re-resolved to 127.0.0.1 must not get a page, or a form token.
+    refused = client.get("/", headers={"Host": "attacker.example:5000"})
+    assert refused.status_code == 400 and 'name="csrf"' not in refused.get_data(as_text=True)
+    assert "FDM_TRUSTED_HOSTS" in refused.get_data(as_text=True)
+    for host in ("127.0.0.1:5000", "localhost:5000", "[::1]:5000"):
+        assert client.get("/", headers={"Host": host}).status_code == 200
+
+
+def test_trusted_hosts_can_be_added(settings):
+    client = create_app(replace(settings, trusted_hosts=(*settings.trusted_hosts, "portal.lan"))).test_client()
+    assert client.get("/", headers={"Host": "portal.lan:5000"}).status_code == 200
+
+
+def test_pages_cannot_be_framed_or_sniffed(client):
+    response = client.get("/")
+    assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
+    assert response.headers["X-Frame-Options"] == "DENY"
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["Referrer-Policy"] == "same-origin"
+    assert "SameSite=Lax" in response.headers["Set-Cookie"]  # the form-token session
+
+
+def test_an_unreadable_bid_log_blocks_bidding(bidding):
+    log = bidding.settings.output_dir / "bids" / f"{bidding.demo_id}.json"
+    log.parent.mkdir()
+    log.write_text('[{"bid_id": 1, "amount": 52', encoding="utf-8")  # cut short
+    page = bidding.client.get(bidding.url).get_data(as_text=True)
+    assert "can&#39;t tell whether a bid was already placed" in page
+
+    form = {"csrf": csrf(bidding.client), "amount": "5200", "period": "3", "milestone_percentage": "50",
+            "description": "A pitch."}
+    page = bidding.client.post(bidding.url, data=form).get_data(as_text=True)
+    assert "can&#39;t tell whether a bid was already placed" in page and 'name="amount" value="5200"' in page
+    assert bidding.sent == [] and log.read_text(encoding="utf-8") == '[{"bid_id": 1, "amount": 52'
+
+
+def test_a_bid_placed_but_not_recorded_is_reported_not_lost(bidding, monkeypatch, caplog):
+    def disk_full(output_dir, demo_id, record):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(web_module, "save_bid", disk_full)
+    form = {"csrf": csrf(bidding.client), "amount": "5200", "period": "3", "milestone_percentage": "50",
+            "description": "The exact text sent."}
+    response = bidding.client.post(bidding.url, data=form)
+    assert response.status_code == 302 and len(bidding.sent) == 1
+    page = bidding.client.get(response.headers["Location"]).get_data(as_text=True)
+    assert "The bid was placed on Freelancer.com (₹5,200 INR), but it could not be recorded here" in page
+    assert "The exact text sent." in caplog.text and "No space left on device" in caplog.text
+
+    # The log doesn't show the bid, so the portal remembers it and won't send another.
+    again = bidding.client.post(bidding.url, data=form, follow_redirects=True).get_data(as_text=True)
+    assert "already been placed" in again and len(bidding.sent) == 1
+
+
+def test_two_bids_at_once_place_only_one(bidding, monkeypatch):
+    def slow_place(token, project_id, **values):
+        time.sleep(0.2)  # the second request arrives while the first is still with Freelancer.com
+        bidding.sent.append(values)
+        return {"bid_id": 555, "amount": values["amount"], "period": values["period"], "currency": "INR",
+                "sign": "₹", "placed_at": "2026-10-15T09:30:00"}
+
+    monkeypatch.setattr(web_module, "place_bid", slow_place)
+    app = bidding.client.application
+    clients = [app.test_client(), app.test_client()]
+    forms = [{"csrf": csrf(c), "amount": "5200", "period": "3", "milestone_percentage": "50",
+              "description": "A pitch."} for c in clients]
+    statuses: list[int] = []
+    threads = [threading.Thread(target=lambda c=c, f=f: statuses.append(c.post(bidding.url, data=f).status_code))
+               for c, f in zip(clients, forms)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert statuses == [302, 302] and len(bidding.sent) == 1
+    assert len(placed_bids(bidding.settings.output_dir, bidding.demo_id)) == 1
+
+
+@pytest.fixture
+def dropped(settings, monkeypatch):
+    """A Freelancer.com gig with a proposal saved with its snapshot, then dropped from the shortlist by a refresh."""
+    settings = replace(settings, freelancer_oauth_token="fl-token")
+    gig = SHORTLIST[0]
+    demo_id = make_demo_id(gig.gig)
+    save_proposal(settings.output_dir, demo_id, "A pitch for the bakery.\n",
+                  {"bid_usd": 60, "pay_type": "fixed", "delivery_days": 4, "score": gig.score,
+                   "gig": asdict(gig.gig)})
+    save_shortlist([SHORTLIST[1]], settings.output_dir)
+    monkeypatch.setattr(web_module, "lookup", lambda token, project_id: (Account(42, "aminul"), INR_PROJECT))
+    app = create_app(settings)
+    return SimpleNamespace(app=app, client=app.test_client(), demo_id=demo_id)
+
+
+def test_a_gig_dropped_from_the_shortlist_can_still_be_bid_on(dropped):
+    page = dropped.client.get(f"/demos/{dropped.demo_id}").get_data(as_text=True)
+    assert "<h1>Bakery landing page</h1>" in page and "No longer on the shortlist · Freelancer.com" in page
+    assert "score 9.4" in page and 'href="https://example.com/101"' in page
+    assert "no new proposals can be written" not in page
+    assert re.search(r'type="submit" >New proposal</button>', page)
+    assert f'href="/demos/{dropped.demo_id}/bid">Review &amp; place bid</a>' in page
+
+    bid_page = dropped.client.get(f"/demos/{dropped.demo_id}/bid").get_data(as_text=True)
+    assert 'name="amount" value="5000"' in bid_page and "A pitch for the bakery." in bid_page
+
+
+def test_a_gig_dropped_from_the_shortlist_can_get_a_new_proposal(dropped, monkeypatch):
+    written: list[str] = []
+
+    async def fake_generate(llm, scored_gig, settings_):
+        written.append(scored_gig.gig.gig_id)
+        saved = save_proposal(settings_.output_dir, dropped.demo_id, "Another pitch.\n", {})
+        return Proposal(dropped.demo_id, scored_gig, Pitch("Another pitch."), "fake-model", saved.path, saved.number)
+
+    monkeypatch.setattr(jobs_module, "generate_proposal", fake_generate)
+    client = dropped.client
+    response = client.post(f"/demos/{dropped.demo_id}/proposals", data={"csrf": csrf(client)})
+    job = wait_for_job(dropped.app, response.headers["Location"].rsplit("/", 1)[-1])
+    assert job.state == "done" and written == ["101"] and job.items[0].proposal_version == 2
+    assert '<span class="gig-rank">–</span>' in client.get(f"/jobs/{job.id}").get_data(as_text=True)
+
+    assert client.post("/demos/no-such-gig-1/proposals", data={"csrf": csrf(client)}).status_code == 404
+
+
+def test_new_proposal_needs_an_api_key(settings):
+    save_shortlist(SHORTLIST, settings.output_dir)
+    client = create_app(replace(settings, ollama_api_key="")).test_client()
+    demo_id = make_demo_id(SHORTLIST[0].gig)
+    page = client.post(f"/demos/{demo_id}/proposals", data={"csrf": csrf(client)}, follow_redirects=True)
+    assert "Set OLLAMA_API_KEY in .env" in page.get_data(as_text=True)
+    assert client.application.extensions["fdm_jobs"].recent() == []

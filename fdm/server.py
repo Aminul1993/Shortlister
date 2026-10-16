@@ -12,7 +12,7 @@ import sys
 
 from waitress import serve
 
-from .config import Settings
+from .config import LOCAL_HOSTS, WILDCARD_HOSTS, ConfigError, Settings
 from .web import create_app
 
 log = logging.getLogger("fdm")
@@ -22,7 +22,11 @@ THREADS = 8
 
 
 def main() -> int:
-    settings = Settings.load()
+    try:
+        settings = Settings.load()
+    except ConfigError as exc:
+        print(f"Configuration error: {exc}. Fix it in .env or the environment, then start again.", file=sys.stderr)
+        return 2
 
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
@@ -31,10 +35,13 @@ def main() -> int:
                         datefmt="%H:%M:%S")
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
-    if settings.host not in {"127.0.0.1", "localhost", "::1"}:
+    if settings.host not in LOCAL_HOSTS:
         log.warning("Listening on %s: the portal has no login, so anyone who can reach it can spend your "
                     "Ollama tokens%s. Keep FDM_HOST=127.0.0.1 unless something else guards it.", settings.host,
                     " and place bids as you" if settings.freelancer_oauth_token else "")
+    if settings.host in WILDCARD_HOSTS and set(settings.trusted_hosts) <= set(LOCAL_HOSTS):
+        log.warning("The portal answers only to %s. Add the name or address you'll open it with to "
+                    "FDM_TRUSTED_HOSTS.", ", ".join(settings.trusted_hosts))
     log.info("Shortlister portal: http://%s:%s  (Ctrl+C to stop)", settings.host, settings.port)
     serve(create_app(settings), host=settings.host, port=settings.port, threads=THREADS)
     return 0

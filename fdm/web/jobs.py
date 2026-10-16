@@ -30,7 +30,7 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class ItemStatus:
-    rank: int
+    rank: int | None  # None once the gig has left the shortlist
     title: str
     platform: str
     gig_url: str
@@ -82,7 +82,7 @@ class JobManager:
         self._queue: queue.Queue[tuple[Job, list[ScoredGig]]] = queue.Queue()
         threading.Thread(target=self._work, name="fdm-jobs", daemon=True).start()
 
-    def submit(self, chosen: list[tuple[int, ScoredGig]]) -> str:
+    def submit(self, chosen: list[tuple[int | None, ScoredGig]]) -> str:
         items = [ItemStatus(rank, s.gig.title, s.gig.platform, s.gig.url, s.score, make_demo_id(s.gig))
                  for rank, s in chosen]
         job = Job(uuid.uuid4().hex[:8], datetime.now(), items)

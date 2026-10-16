@@ -1,6 +1,6 @@
 import asyncio
 import json
-from dataclasses import replace
+from dataclasses import asdict, replace
 
 import httpx
 import pytest
@@ -9,6 +9,7 @@ from fdm.config import Settings
 from fdm.generator import generate_proposal
 from fdm.llm import LLMError, OllamaCloud
 from fdm.models import Gig, ScoredGig
+from fdm.versions import saved_gig
 
 PITCH = {
     "message": "You want customers to add up a bakery order without a phone call.\n\n"
@@ -56,7 +57,10 @@ def test_proposal_is_saved_with_its_suggested_bid(tmp_path):
     assert proposal.path.read_text(encoding="utf-8") == PITCH["message"] + "\n"
     assert proposal.pitch.delivery_days == 2 and proposal.pitch.bid_usd == 80  # no budget, so the estimate stands
     meta = json.loads(proposal.path.with_suffix(".json").read_text(encoding="utf-8"))
-    assert meta == {"model": "m1", "bid_usd": 80, "pay_type": "unknown", "delivery_days": 2}
+    assert meta == {"model": "m1", "bid_usd": 80, "pay_type": "unknown", "delivery_days": 2,
+                    "score": 9.0, "gig": asdict(SCORED.gig)}
+    # The snapshot keeps the gig workable after a refresh drops it from the shortlist.
+    assert saved_gig(tmp_path, "bakery-calculator-123") == replace(SCORED, breakdown={}, signals=[])
     # Nothing goes with a bid, so the Pitch Writer is told never to mention an attachment.
     assert "Nothing is attached" in prompts["system"] and "Never mention a screenshot" in prompts["system"]
     assert "No profile given" in prompts["user"] and "Client budget: not given" in prompts["user"]

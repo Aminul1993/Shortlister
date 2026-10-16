@@ -9,7 +9,7 @@
   {% for item in job.items %}
   <li class="project">
     <div class="project-head">
-      <span class="gig-rank">{{ item.rank }}</span>
+      <span class="gig-rank">{{ item.rank or '–' }}</span>
       <div class="project-title">
         <a href="{{ item.gig_url }}" target="_blank" rel="noopener noreferrer">{{ item.title }}</a>
         <span class="muted">{{ item.platform }} · score {{ '%.1f'|format(item.score) }}</span>

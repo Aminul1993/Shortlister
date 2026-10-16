@@ -87,6 +87,12 @@ def _parse_date(raw: str | None) -> datetime | None:
         return None
 
 
+def _web_url(link: str) -> str:
+    """The link if it is http(s), else "" so the gig is dropped: a feed must not put javascript: links in the portal."""
+    link = link.strip()
+    return link if urlparse(link).scheme.lower() in {"http", "https"} else ""
+
+
 def _feed_gig(platform: str, guid: str, title: str | None, body: str | None, link: str, posted: str | None) -> Gig:
     return Gig(
         platform=platform,
@@ -104,14 +110,14 @@ def parse_feed(xml_text: str, feed_url: str) -> list[Gig]:
     platform = (urlparse(feed_url).hostname or feed_url).removeprefix("www.")
     gigs: list[Gig] = []
     for item in root.iter("item"):
-        link = (item.findtext("link") or "").strip()
+        link = _web_url(item.findtext("link") or "")
         gigs.append(
             _feed_gig(platform, item.findtext("guid") or link, item.findtext("title"),
                       item.findtext("description"), link, item.findtext("pubDate"))
         )
     for entry in root.iter(f"{ATOM}entry"):
         link_el = entry.find(f"{ATOM}link")
-        link = (link_el.get("href") if link_el is not None else "") or ""
+        link = _web_url((link_el.get("href") if link_el is not None else "") or "")
         body = entry.findtext(f"{ATOM}content") or entry.findtext(f"{ATOM}summary")
         gigs.append(
             _feed_gig(platform, entry.findtext(f"{ATOM}id") or link, entry.findtext(f"{ATOM}title"),

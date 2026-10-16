@@ -8,16 +8,16 @@
     <h1>{{ title }}</h1>
     <p class="muted">
       {% if scored %}
-      #{{ rank }} · {{ scored.gig.platform }} · score {{ '%.1f'|format(scored.score) }}
+      {% if rank %}#{{ rank }}{% else %}No longer on the shortlist{% endif %} · {{ scored.gig.platform }}
+      · score {{ '%.1f'|format(scored.score) }}
       · <a href="{{ scored.gig.url }}" target="_blank" rel="noopener noreferrer">View gig ↗</a>
       {% else %}No longer on the shortlist{% endif %}
       · {{ proposals|length }} proposal{{ 's' if proposals|length != 1 }}
     </p>
   </div>
   {% if scored %}
-  <form method="post" action="{{ url_for('create_job') }}" class="regen" data-busy-label="Starting…">
+  <form method="post" action="{{ url_for('new_proposal', demo_id=demo_id) }}" class="regen" data-busy-label="Starting…">
     <input type="hidden" name="csrf" value="{{ csrf_token() }}">
-    <input type="hidden" name="gig" value="{{ key }}">
     <button class="btn {{ 'btn-secondary' if proposals else 'btn-primary' }}" type="submit" {% if not can_generate %}disabled{% endif %}>New proposal</button>
   </form>
   {% endif %}

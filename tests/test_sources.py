@@ -67,3 +67,12 @@ def test_parse_atom():
     assert gig.url == "https://jobs.example.org/42"
     assert gig.description == "One page, contact form."
     assert gig.posted_at is not None and gig.posted_at.day == 12
+
+
+def test_feed_items_without_a_web_link_are_dropped():
+    # A malicious or compromised feed must not put a script link on the portal's pages.
+    rss = RSS.replace("https://gigs.example.com/1", " JavaScript:alert(document.domain)")
+    assert parse_feed(rss, "https://gigs.example.com/feed.rss") == []
+    atom = ATOM.replace("https://jobs.example.org/42", "data:text/html,&lt;script&gt;alert(1)&lt;/script&gt;")
+    assert parse_feed(atom, "https://jobs.example.org/atom") == []
+    assert parse_feed(ATOM.replace("https://", "HTTPS://"), "https://jobs.example.org/atom")[0].url.startswith("HTTPS:")

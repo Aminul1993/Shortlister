@@ -4,7 +4,7 @@ Finds small, beginner-friendly web gigs, ranks the ten easiest, and lets you sho
 one, an Ollama Cloud agent writes a proposal: a short pitch tailored to the gig, with a suggested bid
 and delivery time. Each run saves a new version of the proposal, and older versions are kept. When
 you're happy with a proposal, you can review it beside the live Freelancer.com project and place the
-bid from the portal through Freelancer's official SDK.
+bid from the portal through Freelancer.com's API.
 
 ```
 search feeds ─► rank 1-10 ─► you pick "1, 4, 7" ─► Pitch Writer ─► proposal .txt ─► you review ─► bid on Freelancer.com
@@ -30,6 +30,7 @@ cp .env.example .env              # then fill in the key
 | `FDM_FREELANCER_PROFILE` | Optional true facts about you (skills, past work) that proposals may mention. The Pitch Writer never invents experience, so without this it argues from the delivery plan alone |
 | `FREELANCER_OAUTH_TOKEN` | Optional OAuth token for your Freelancer.com account, from the [developer portal](https://developers.freelancer.com). With it, the portal can place bids for you. Anyone with the token can bid as you |
 | `FDM_HOST` / `FDM_PORT` | Where the portal listens. Default `127.0.0.1` and `5000` |
+| `FDM_TRUSTED_HOSTS` | Extra host names the portal answers to, comma-separated, without ports. It always answers to `127.0.0.1`, `localhost`, `[::1]` and `FDM_HOST`, and refuses any other name with HTTP 400. If `FDM_HOST` is `0.0.0.0`, list the LAN address or name you'll open it with |
 | `FDM_SHORTLIST_SIZE` | How many gigs a refresh keeps. Default `10` |
 | `FDM_LOG_LEVEL` | `DEBUG`, `INFO` (default), `WARNING` or `ERROR` |
 
@@ -59,7 +60,10 @@ progress live in that process's memory. Stop it with Ctrl+C.
    It shows each proposal with a **Copy** button, its word count, a suggested bid and delivery time,
    the model that wrote it, its version number and file path, and any errors.
 4. The **version history** page (`/demos/<demo_id>`, linked from the tags and the job page) lists
-   every saved proposal of a gig, newest first, and has a **New proposal** button.
+   every saved proposal of a gig, newest first, and has a **New proposal** button. A gig keeps its
+   page, **New proposal** button and bid after a refresh drops it from the shortlist, because each
+   proposal is saved with a snapshot of the gig. Proposals saved before snapshots don't have one, so
+   those gigs can't get new proposals or bids once they leave the shortlist.
 5. **Send**: on the version history page of a Freelancer.com gig, click **Review & place bid**. The bid page
    looks the project up live and shows the account the bid comes from, whether the project still takes bids,
    its budget in its own currency and how many bids it has. The form is filled in with the latest proposal,
@@ -74,18 +78,28 @@ Jobs run one at a time in a background thread, while gigs within a job are writt
 Job history is kept in memory only, but every version of every proposal stays in `output/`. The
 **Write proposals** button is disabled until `OLLAMA_API_KEY` is set, and bidding needs
 `FREELANCER_OAUTH_TOKEN`. The portal has no login: it binds to localhost by default, and every form is
-CSRF-protected because each POST spends LLM tokens, queries the gig feeds or places a bid.
+CSRF-protected because each POST spends LLM tokens, queries the gig feeds or places a bid. It also
+refuses host names it doesn't know (see `FDM_TRUSTED_HOSTS`), so a web page can't reach it through DNS
+rebinding. Its pages can't be framed by other sites, and gig links from feeds must be `http(s)`.
+A setting with an unusable value, such as `FDM_PORT=abc`, stops the portal at startup with a message
+that names it.
 
 Outputs:
 
 - `output/top10.md` / `top10.json`: the ranked table plus gig links and score breakdowns
 - `output/proposals/<demo_id>.txt`: the proposal for that gig as plain text, ready to paste. Later
   versions are saved as `<demo_id>-v2.txt`, `<demo_id>-v3.txt` and so on.
-- A `.json` file beside each proposal records the model that wrote it, the suggested bid and the
-  delivery time. Files saved before versioning have no `.json` and count as version 1.
+- A `.json` file beside each proposal records the model that wrote it, the suggested bid, the
+  delivery time, and the gig and its score at the time. Files saved before versioning have no `.json`
+  and count as version 1.
 - `output/bids/<demo_id>.json`: every bid placed on that gig from the portal. Each entry has the bid id,
   amount, currency, delivery days, upfront milestone, the proposal version it started from and the exact
-  text sent.
+  text sent. If this file can't be read, the portal won't place a bid on that gig until you fix or
+  move it, because it can't tell whether a bid was already placed. If a bid is placed but can't be
+  recorded, the portal says so and writes the full record, including the text sent, to its log.
+
+Every file in `output/` is replaced in one step, so a crash or a full disk leaves the old version or
+the new one, never half a file.
 
 ## How it works
 
@@ -95,7 +109,7 @@ Outputs:
 | 1. Rank | [fdm/ranking.py](fdm/ranking.py) | Scores each gig from 1 to 10. Velocity (landing pages, calculators, small APIs) counts 40%, independence (no payments, databases, auth, mobile, CMS) counts 35%, and clarity (specific, itemised, not sprawling) counts 25%. Gigs that aren't web builds, like SEO, ads or data entry, are damped. |
 | 2. Proposal | [fdm/agents.py](fdm/agents.py), [fdm/generator.py](fdm/generator.py), [fdm/versions.py](fdm/versions.py) | **The Pitch Writer** gets the job post, the client's budget and your `FDM_FREELANCER_*` facts. It writes 120-200 words of plain text in your voice. The pitch opens on the client's goal, then makes it concrete by describing how the finished build will work for them. It answers the 2-3 requirements that matter most, gives a delivery plan, and ends on one question that is easy to answer. It follows the post's own bid instructions, such as a code word, and never mentions a screenshot, mockup or attachment. Replies with placeholders like `[Your Name]` are rejected and retried. Every proposal comes with a suggested bid and delivery time. The bid is kept inside the client's budget, or is the agent's estimate for the scope when the gig states none. The proposal is saved as the gig's next version. |
 | 2. LLM client | [fdm/llm.py](fdm/llm.py) | Calls Ollama Cloud `/api/chat`. Rate-limit or token-limit errors fall back to the next, smaller model. 5xx errors and unusable replies are retried. A bad API key stops the run. |
-| 3. Bid | [fdm/bids.py](fdm/bids.py) | Uses [freelancersdk](https://github.com/freelancer/freelancer-sdk-python), Freelancer.com's official Python SDK. The bid page calls `get_self` for the account and `get_project_by_id` for the project's live state. Placing a bid checks both again, refuses a project that no longer takes bids, then calls `place_project_bid` with the amount, delivery days, upfront milestone percentage and text from the form. SDK errors, unreadable replies, network failures and requests that take over 30 seconds become one message that names the step that failed. |
+| 3. Bid | [fdm/bids.py](fdm/bids.py), [fdm/freelancer.py](fdm/freelancer.py) | Calls Freelancer.com's API with httpx, sending your token in the `Freelancer-OAuth-V1` header. The bid page calls `GET /api/users/0.1/self/` for the account and `GET /api/projects/0.1/projects/<id>/` for the project's live state. Placing a bid checks both again, refuses a project that no longer takes bids, then calls `POST /api/projects/0.1/bids/` with the amount, delivery days, upfront milestone percentage and text from the form. Freelancer.com's own error messages, unreadable replies, network failures and requests that take over 30 seconds become one message that names the step that failed. When the outcome of placing a bid is unclear, such as a timeout after the bid was sent, the message says it may have been placed, so check the project before trying again. |
 
 ## Notes
 
