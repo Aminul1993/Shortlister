@@ -11,7 +11,7 @@ from dataclasses import asdict
 
 from .agents import run_pitch_writer
 from .config import Settings
-from .llm import OllamaCloud
+from .llm import GroqClient
 from .models import Proposal, ScoredGig
 from .store import make_demo_id
 from .versions import save_proposal
@@ -19,7 +19,7 @@ from .versions import save_proposal
 log = logging.getLogger(__name__)
 
 
-async def generate_proposal(llm: OllamaCloud, scored: ScoredGig, settings: Settings) -> Proposal:
+async def generate_proposal(llm: GroqClient, scored: ScoredGig, settings: Settings) -> Proposal:
     """Write a new proposal for the gig, keeping the older ones.
 
     Raises LLMError if no usable proposal was written; nothing is saved then.

@@ -1,7 +1,7 @@
 """Background jobs for the portal: write a new proposal for each selected gig.
 
 Jobs run one at a time on a single daemon worker thread, so two jobs never claim the same version
-number or compete for Ollama rate limits. Each gig inside a job is processed concurrently and its
+number or compete for Groq rate limits. Each gig inside a job is processed concurrently and its
 status is updated as it moves through the pipeline:
 
     queued -> generating -> done
@@ -21,7 +21,7 @@ from datetime import datetime
 
 from ..config import Settings
 from ..generator import generate_proposal
-from ..llm import OllamaCloud
+from ..llm import GroqClient
 from ..models import ScoredGig
 from ..store import make_demo_id
 
@@ -124,11 +124,11 @@ class JobManager:
 
     async def _run(self, job: Job, chosen: list[ScoredGig]) -> None:
         s = self.settings
-        async with OllamaCloud(s.ollama_api_key, s.ollama_models, s.ollama_base_url,
-                               concurrency=s.llm_concurrency) as llm:
+        async with GroqClient(s.groq_api_key, s.groq_models, s.groq_base_url,
+                              concurrency=s.llm_concurrency) as llm:
             await asyncio.gather(*(self._build(item, scored, llm) for item, scored in zip(job.items, chosen)))
 
-    async def _build(self, item: ItemStatus, scored: ScoredGig, llm: OllamaCloud) -> None:
+    async def _build(self, item: ItemStatus, scored: ScoredGig, llm: GroqClient) -> None:
         self._update(item, state="generating")
         try:
             proposal = await generate_proposal(llm, scored, self.settings)

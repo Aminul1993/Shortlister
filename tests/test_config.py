@@ -3,7 +3,7 @@ import pytest
 from fdm.config import ConfigError, Settings
 
 VARIABLES = ("FDM_HOST", "FDM_PORT", "FDM_TRUSTED_HOSTS", "FDM_LLM_CONCURRENCY", "FDM_RESULTS_PER_QUERY",
-             "FDM_SHORTLIST_SIZE", "FDM_LOG_LEVEL", "OLLAMA_API_KEY", "FREELANCER_OAUTH_TOKEN")
+             "FDM_SHORTLIST_SIZE", "FDM_LOG_LEVEL", "GROQ_API_KEY", "FREELANCER_OAUTH_TOKEN")
 
 
 @pytest.fixture
@@ -60,6 +60,6 @@ def test_trusted_hosts(load, env, trusted):
 
 
 def test_secrets_stay_out_of_the_repr(load):
-    settings = load(OLLAMA_API_KEY="ollama-secret", FREELANCER_OAUTH_TOKEN="fl-secret")
-    assert settings.ollama_api_key == "ollama-secret" and settings.freelancer_oauth_token == "fl-secret"
+    settings = load(GROQ_API_KEY="groq-secret", FREELANCER_OAUTH_TOKEN="fl-secret")
+    assert settings.groq_api_key == "groq-secret" and settings.freelancer_oauth_token == "fl-secret"
     assert "secret" not in repr(settings)

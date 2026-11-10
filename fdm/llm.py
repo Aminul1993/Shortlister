@@ -1,11 +1,11 @@
-"""Ollama Cloud chat client with retries and fallback to smaller models.
+"""Groq chat client (OpenAI-compatible /chat/completions) with retries and fallback to smaller models.
 
 Failure policy per model in the chain (largest first):
-  401/403                      -> LLMAuthError immediately (a bad key fails every model)
-  402 (not in plan), 404       -> next model, and skip this one for the client's lifetime
-  429 or rate/token/context    -> next (smaller) model right away
-  5xx, timeouts, unusable text -> retry the same model with backoff, then next model
-  other 4xx                    -> next model
+  401/403                            -> LLMAuthError immediately (a bad key fails every model)
+  404, model_not_found/decommissioned -> next model, and skip this one for the client's lifetime
+  413/429/498 or rate/token/context  -> next (smaller) model right away
+  5xx, timeouts, unusable text       -> retry the same model with backoff, then next model
+  other 4xx                          -> next model
 If a whole pass failed only because of limits, the chain is retried once after a cooldown.
 """
 
@@ -24,10 +24,13 @@ log = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
+DEFAULT_BASE_URL = "https://api.groq.com/openai/v1"
+
 _LIMIT_HINTS = re.compile(
-    r"rate.?limit|too many requests|quota|usage limit|tokens?|context (?:length|window)|too long|exceed",
+    r"rate.?limit|too many requests|quota|usage limit|tokens?|context.(?:length|window)|too long|exceed",
     re.I,
 )
+_UNAVAILABLE_CODES = {"model_not_found", "model_decommissioned"}
 
 
 class LLMError(RuntimeError):
@@ -60,13 +63,17 @@ def parse_json_object(text: str) -> dict[str, Any]:
     return value
 
 
-def _error_detail(response: httpx.Response) -> str:
+def _error_detail(response: httpx.Response) -> tuple[str, str]:
+    """(code, message) from an error reply shaped like {"error": {"message": ..., "code": ...}}."""
     try:
         body = response.json()
-        detail = body.get("error") if isinstance(body, dict) else None
     except ValueError:
-        detail = None
-    return str(detail or response.text or response.reason_phrase)[:300]
+        body = None
+    error = body.get("error") if isinstance(body, dict) else None
+    code, message = "", error
+    if isinstance(error, dict):
+        code, message = str(error.get("code") or ""), error.get("message")
+    return code, str(message or response.text or response.reason_phrase)[:300]
 
 
 def _retry_after(response: httpx.Response) -> float | None:
@@ -76,12 +83,12 @@ def _retry_after(response: httpx.Response) -> float | None:
         return None
 
 
-class OllamaCloud:
+class GroqClient:
     def __init__(
         self,
         api_key: str,
         models: tuple[str, ...] | list[str],
-        base_url: str = "https://ollama.com",
+        base_url: str = DEFAULT_BASE_URL,
         *,
         retries_per_model: int = 1,
         rounds: int = 2,
@@ -92,11 +99,11 @@ class OllamaCloud:
         transport: httpx.AsyncBaseTransport | None = None,
     ):
         if not api_key:
-            raise LLMAuthError("OLLAMA_API_KEY is not set")
+            raise LLMAuthError("GROQ_API_KEY is not set")
         if not models:
             raise ValueError("at least one model is required")
         self.models = list(models)
-        self.unavailable: set[str] = set()  # models this account cannot use (402/404)
+        self.unavailable: set[str] = set()  # models this account cannot use (404, decommissioned)
         self._retries = retries_per_model
         self._rounds = rounds
         self._backoff = backoff
@@ -109,7 +116,7 @@ class OllamaCloud:
             transport=transport,
         )
 
-    async def __aenter__(self) -> OllamaCloud:
+    async def __aenter__(self) -> GroqClient:
         return self
 
     async def __aexit__(self, *exc_info: object) -> None:
@@ -120,10 +127,13 @@ class OllamaCloud:
         messages: list[dict[str, str]],
         *,
         parse: Callable[[str], T],
-        json_schema: dict | None = None,
+        json_mode: bool = False,
         temperature: float = 0.2,
     ) -> tuple[T, str]:
-        """Return (parse(reply), model_used). `parse` raising ValueError counts as a bad reply."""
+        """Return (parse(reply), model_used). `parse` raising ValueError counts as a bad reply.
+
+        json_mode asks Groq for a JSON object. The messages must mention JSON and describe the fields wanted.
+        """
         failures: list[str] = []
         async with self._semaphore:
             for round_no in range(self._rounds):
@@ -133,14 +143,14 @@ class OllamaCloud:
                         continue
                     for attempt in range(self._retries + 1):
                         try:
-                            reply = await self._chat(model, messages, json_schema, temperature)
+                            reply = await self._chat(model, messages, json_mode, temperature)
                             try:
                                 return parse(reply), model
                             except ValueError as exc:
                                 raise _Failure("transient", f"unusable reply: {exc}") from exc
                         except _Failure as failure:
                             failures.append(f"{model}: {failure}")
-                            log.warning("Ollama model %s failed (%s): %s", model, failure.kind, failure)
+                            log.warning("Groq model %s failed (%s): %s", model, failure.kind, failure)
                             if failure.kind == "transient" and attempt < self._retries:
                                 await asyncio.sleep(self._backoff * 2**attempt)
                                 continue
@@ -149,7 +159,7 @@ class OllamaCloud:
                                 cooldown = max(cooldown, failure.retry_after or self._cooldown)
                             elif failure.kind == "unavailable":
                                 self.unavailable.add(model)
-                                log.warning("Skipping %s for the rest of this run; adjust OLLAMA_MODELS", model)
+                                log.warning("Skipping %s for the rest of this run; adjust GROQ_MODELS", model)
                             break
                 if not limited or round_no == self._rounds - 1:
                     break
@@ -157,21 +167,16 @@ class OllamaCloud:
                 await asyncio.sleep(cooldown)
         if not failures:
             raise LLMError(f"none of the configured models are available to this account: "
-                           f"{', '.join(self.models)}. Set OLLAMA_MODELS to models your plan includes.")
-        raise LLMError("all Ollama Cloud models failed: " + "; ".join(failures[-6:]))
+                           f"{', '.join(self.models)}. Set GROQ_MODELS to models your account can use.")
+        raise LLMError("all Groq models failed: " + "; ".join(failures[-6:]))
 
-    async def _chat(self, model: str, messages: list[dict[str, str]], json_schema: dict | None,
+    async def _chat(self, model: str, messages: list[dict[str, str]], json_mode: bool,
                     temperature: float) -> str:
-        body: dict[str, Any] = {
-            "model": model,
-            "messages": messages,
-            "stream": False,
-            "options": {"temperature": temperature},
-        }
-        if json_schema is not None:
-            body["format"] = json_schema
+        body: dict[str, Any] = {"model": model, "messages": messages, "temperature": temperature}
+        if json_mode:
+            body["response_format"] = {"type": "json_object"}
         try:
-            response = await self._client.post("/api/chat", json=body)
+            response = await self._client.post("/chat/completions", json=body)
         except httpx.TimeoutException as exc:
             raise _Failure("transient", f"timeout: {exc!r}") from exc
         except httpx.TransportError as exc:
@@ -180,19 +185,22 @@ class OllamaCloud:
         status = response.status_code
         if status == 200:
             try:
-                content = ((response.json().get("message") or {}).get("content") or "").strip()
-            except ValueError as exc:
-                raise _Failure("transient", "response body is not JSON") from exc
+                choice = (response.json().get("choices") or [{}])[0]
+                content = ((choice.get("message") or {}).get("content") or "").strip()
+            except (ValueError, AttributeError) as exc:
+                raise _Failure("transient", "unreadable response body") from exc
             if not content:
                 raise _Failure("transient", "empty completion")
             return content
 
-        detail = _error_detail(response)
+        code, detail = _error_detail(response)
         if status in (401, 403):
-            raise LLMAuthError(f"Ollama Cloud rejected the API key (HTTP {status}): {detail}")
-        if status in (402, 404):
+            raise LLMAuthError(f"Groq rejected the API key (HTTP {status}): {detail}")
+        if status == 404 or code in _UNAVAILABLE_CODES:
             raise _Failure("unavailable", f"HTTP {status}: {detail}")
-        if status == 429 or _LIMIT_HINTS.search(detail):
+        if code == "json_validate_failed":  # JSON mode caught a malformed reply; a retry usually works
+            raise _Failure("transient", f"HTTP {status}: {detail}")
+        if status in (413, 429, 498) or _LIMIT_HINTS.search(f"{code} {detail}"):
             raise _Failure("limit", f"HTTP {status}: {detail}", _retry_after(response))
         if status >= 500 or status == 408:
             raise _Failure("transient", f"HTTP {status}: {detail}")

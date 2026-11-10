@@ -1,7 +1,7 @@
 # Shortlister
 
 Finds small, beginner-friendly web gigs, ranks the ten easiest, and lets you shortlist some. For each
-one, an Ollama Cloud agent writes a proposal: a short pitch tailored to the gig, with a suggested bid
+one, an agent running on Groq writes a proposal: a short pitch tailored to the gig, with a suggested bid
 and delivery time. Each run saves a new version of the proposal, and older versions are kept. When
 you're happy with a proposal, you can review it beside the live Freelancer.com project and place the
 bid from the portal through Freelancer.com's API.
@@ -23,8 +23,8 @@ cp .env.example .env              # then fill in the key
 
 | Variable | Purpose |
 |---|---|
-| `OLLAMA_API_KEY` | Ollama Cloud key ([ollama.com/settings/keys](https://ollama.com/settings/keys)) |
-| `OLLAMA_MODELS` | Fallback chain, largest first. Default `kimi-k2.7-code,gpt-oss:120b,gpt-oss:20b` |
+| `GROQ_API_KEY` | Groq API key ([console.groq.com/keys](https://console.groq.com/keys)) |
+| `GROQ_MODELS` | Fallback chain of [Groq model ids](https://console.groq.com/docs/models), largest first. Default `openai/gpt-oss-120b,openai/gpt-oss-20b` |
 | `FDM_RSS_FEEDS` | Optional comma-separated RSS/Atom gig feeds to scan in addition to Freelancer.com |
 | `FDM_FREELANCER_NAME` | Optional name to sign proposals with |
 | `FDM_FREELANCER_PROFILE` | Optional true facts about you (skills, past work) that proposals may mention. The Pitch Writer never invents experience, so without this it argues from the delivery plan alone |
@@ -76,7 +76,7 @@ progress live in that process's memory. Stop it with Ctrl+C.
 
 Jobs run one at a time in a background thread, while gigs within a job are written concurrently.
 Job history is kept in memory only, but every version of every proposal stays in `output/`. The
-**Write proposals** button is disabled until `OLLAMA_API_KEY` is set, and bidding needs
+**Write proposals** button is disabled until `GROQ_API_KEY` is set, and bidding needs
 `FREELANCER_OAUTH_TOKEN`. The portal has no login: it binds to localhost by default, and every form is
 CSRF-protected because each POST spends LLM tokens, queries the gig feeds or places a bid. It also
 refuses host names it doesn't know (see `FDM_TRUSTED_HOSTS`), so a web page can't reach it through DNS
@@ -108,7 +108,7 @@ the new one, never half a file.
 | 1. Aggregate | [fdm/sources.py](fdm/sources.py) | Playwright's HTTP client queries the public Freelancer.com projects API, filtered to web/Python skills, for the latest gigs plus several keyword searches. It also reads any RSS/Atom feeds you configure. No browser is launched. |
 | 1. Rank | [fdm/ranking.py](fdm/ranking.py) | Scores each gig from 1 to 10. Velocity (landing pages, calculators, small APIs) counts 40%, independence (no payments, databases, auth, mobile, CMS) counts 35%, and clarity (specific, itemised, not sprawling) counts 25%. Gigs that aren't web builds, like SEO, ads or data entry, are damped. |
 | 2. Proposal | [fdm/agents.py](fdm/agents.py), [fdm/generator.py](fdm/generator.py), [fdm/versions.py](fdm/versions.py) | **The Pitch Writer** gets the job post, the client's budget and your `FDM_FREELANCER_*` facts. It writes 120-200 words of plain text in your voice. The pitch opens on the client's goal, then makes it concrete by describing how the finished build will work for them. It answers the 2-3 requirements that matter most, gives a delivery plan, and ends on one question that is easy to answer. It follows the post's own bid instructions, such as a code word, and never mentions a screenshot, mockup or attachment. Replies with placeholders like `[Your Name]` are rejected and retried. Every proposal comes with a suggested bid and delivery time. The bid is kept inside the client's budget, or is the agent's estimate for the scope when the gig states none. The proposal is saved as the gig's next version. |
-| 2. LLM client | [fdm/llm.py](fdm/llm.py) | Calls Ollama Cloud `/api/chat`. Rate-limit or token-limit errors fall back to the next, smaller model. 5xx errors and unusable replies are retried. A bad API key stops the run. |
+| 2. LLM client | [fdm/llm.py](fdm/llm.py) | Calls Groq's OpenAI-compatible `/chat/completions` in JSON mode. Rate-limit, token-limit and request-size errors (HTTP 429/413) fall back to the next, smaller model, honouring `retry-after`. Models that don't exist or were decommissioned are skipped for the rest of the run. 5xx errors, invalid JSON and unusable replies are retried. A bad API key stops the run. |
 | 3. Bid | [fdm/bids.py](fdm/bids.py), [fdm/freelancer.py](fdm/freelancer.py) | Calls Freelancer.com's API with httpx, sending your token in the `Freelancer-OAuth-V1` header. The bid page calls `GET /api/users/0.1/self/` for the account and `GET /api/projects/0.1/projects/<id>/` for the project's live state. Placing a bid checks both again, refuses a project that no longer takes bids, then calls `POST /api/projects/0.1/bids/` with the amount, delivery days, upfront milestone percentage and text from the form. Freelancer.com's own error messages, unreadable replies, network failures and requests that take over 30 seconds become one message that names the step that failed. When the outcome of placing a bid is unclear, such as a timeout after the bid was sent, the message says it may have been placed, so check the project before trying again. |
 
 ## Notes

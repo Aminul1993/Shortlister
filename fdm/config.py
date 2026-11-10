@@ -8,9 +8,10 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Ollama Cloud models, largest first. fdm.llm falls back down this chain when a
+# Groq models, largest first. fdm.llm falls back down this chain when a
 # model reports a rate-limit or token-limit error.
-DEFAULT_MODELS = ("kimi-k2.7-code", "gpt-oss:120b", "gpt-oss:20b")
+DEFAULT_MODELS = ("openai/gpt-oss-120b", "openai/gpt-oss-20b")
+DEFAULT_GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
 # Keyword searches run in addition to the "latest gigs" feed.
 DEFAULT_QUERIES = (
@@ -73,9 +74,9 @@ def _trusted_hosts(bind: str) -> tuple[str, ...]:
 @dataclass(frozen=True)
 class Settings:
     # Secrets stay out of the repr, so a logged or diffed Settings doesn't print them.
-    ollama_api_key: str = field(repr=False)
-    ollama_base_url: str
-    ollama_models: tuple[str, ...]
+    groq_api_key: str = field(repr=False)
+    groq_base_url: str
+    groq_models: tuple[str, ...]
     output_dir: Path
     search_queries: tuple[str, ...]
     rss_feeds: tuple[str, ...]
@@ -101,9 +102,9 @@ class Settings:
         load_dotenv(env_file, override=False)
         host = os.getenv("FDM_HOST", "").strip() or "127.0.0.1"
         return cls(
-            ollama_api_key=os.getenv("OLLAMA_API_KEY", "").strip(),
-            ollama_base_url=os.getenv("OLLAMA_BASE_URL", "https://ollama.com").strip().rstrip("/"),
-            ollama_models=_csv("OLLAMA_MODELS", DEFAULT_MODELS),
+            groq_api_key=os.getenv("GROQ_API_KEY", "").strip(),
+            groq_base_url=(os.getenv("GROQ_BASE_URL", "").strip() or DEFAULT_GROQ_BASE_URL).rstrip("/"),
+            groq_models=_csv("GROQ_MODELS", DEFAULT_MODELS),
             output_dir=Path(os.getenv("FDM_OUTPUT_DIR", "output")),
             search_queries=_csv("FDM_SEARCH_QUERIES", DEFAULT_QUERIES),
             rss_feeds=_csv("FDM_RSS_FEEDS", ()),

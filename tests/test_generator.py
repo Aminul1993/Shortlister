@@ -7,7 +7,7 @@ import pytest
 
 from fdm.config import Settings
 from fdm.generator import generate_proposal
-from fdm.llm import LLMError, OllamaCloud
+from fdm.llm import GroqClient, LLMError
 from fdm.models import Gig, ScoredGig
 from fdm.versions import saved_gig
 
@@ -33,10 +33,11 @@ def _generate(tmp_path, pitch_reply: str = json.dumps(PITCH), prompts: dict[str,
         calls.append(messages[0]["content"])
         if prompts is not None:
             prompts["system"], prompts["user"] = messages[0]["content"], messages[1]["content"]
-        return httpx.Response(200, json={"message": {"role": "assistant", "content": pitch_reply}})
+        assert json.loads(request.content)["response_format"] == {"type": "json_object"}
+        return httpx.Response(200, json={"choices": [{"message": {"role": "assistant", "content": pitch_reply}}]})
 
     async def go():
-        async with OllamaCloud("key", ["m1"], transport=httpx.MockTransport(handler), backoff=0) as llm:
+        async with GroqClient("key", ["m1"], transport=httpx.MockTransport(handler), backoff=0) as llm:
             settings = replace(Settings.load(env_file=tmp_path / "missing.env"), output_dir=tmp_path,
                                **settings_changes)
             return await generate_proposal(llm, SCORED, settings)

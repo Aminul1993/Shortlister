@@ -37,7 +37,7 @@ def main() -> int:
 
     if settings.host not in LOCAL_HOSTS:
         log.warning("Listening on %s: the portal has no login, so anyone who can reach it can spend your "
-                    "Ollama tokens%s. Keep FDM_HOST=127.0.0.1 unless something else guards it.", settings.host,
+                    "Groq tokens%s. Keep FDM_HOST=127.0.0.1 unless something else guards it.", settings.host,
                     " and place bids as you" if settings.freelancer_oauth_token else "")
     if settings.host in WILDCARD_HOSTS and set(settings.trusted_hosts) <= set(LOCAL_HOSTS):
         log.warning("The portal answers only to %s. Add the name or address you'll open it with to "

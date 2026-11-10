@@ -1,7 +1,7 @@
 [project]
 name = "freelance-demo-machine"
 version = "0.1.0"
-description = "Find easy freelance web gigs, draft proposals with Ollama Cloud, and bid on Freelancer.com."
+description = "Find easy freelance web gigs, draft proposals with Groq, and bid on Freelancer.com."
 requires-python = ">=3.11"
 
 [tool.pytest.ini_options]

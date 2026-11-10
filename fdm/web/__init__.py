@@ -133,7 +133,7 @@ def create_app(settings: Settings | None = None) -> Flask:
             rows=rows,
             updated=shortlist_updated_at(settings.output_dir),
             jobs=jobs.recent(),
-            can_generate=bool(settings.ollama_api_key),
+            can_generate=bool(settings.groq_api_key),
         )
 
     @app.post("/refresh")
@@ -154,8 +154,8 @@ def create_app(settings: Settings | None = None) -> Flask:
 
     @app.post("/jobs")
     def create_job():
-        if not settings.ollama_api_key:
-            flash("Set OLLAMA_API_KEY in .env and restart the portal before writing proposals.", "error")
+        if not settings.groq_api_key:
+            flash("Set GROQ_API_KEY in .env and restart the portal before writing proposals.", "error")
             return redirect(url_for("index"))
         shortlist = {gig_key(s.gig): (rank, s) for rank, s in enumerate(load_shortlist(settings.output_dir), 1)}
         selected = list(dict.fromkeys(request.form.getlist("gig")))  # a gig twice would race for one version number
@@ -173,8 +173,8 @@ def create_app(settings: Settings | None = None) -> Flask:
         entry = find_gig(demo_id)
         if entry is None:
             abort(404)
-        if not settings.ollama_api_key:
-            flash("Set OLLAMA_API_KEY in .env and restart the portal before writing proposals.", "error")
+        if not settings.groq_api_key:
+            flash("Set GROQ_API_KEY in .env and restart the portal before writing proposals.", "error")
             return redirect(url_for("demo", demo_id=demo_id))
         return redirect(url_for("job_detail", job_id=jobs.submit([entry])))
 
@@ -204,7 +204,7 @@ def create_app(settings: Settings | None = None) -> Flask:
             rank=entry[0] if entry else None,
             scored=entry[1] if entry else None,
             proposals=written[::-1],
-            can_generate=bool(settings.ollama_api_key),
+            can_generate=bool(settings.groq_api_key),
             biddable=bool(entry and can_bid_on(entry[1])),
             can_bid=bool(settings.freelancer_oauth_token),
             placed=placed[::-1],

@@ -28,7 +28,7 @@ SHORTLIST = [scored("101", "Bakery landing page", 9.4), scored("202", "BMI calcu
 @pytest.fixture
 def settings(tmp_path):
     base = Settings.load(env_file=tmp_path / "missing.env")
-    return replace(base, output_dir=tmp_path, ollama_api_key="test-key")
+    return replace(base, output_dir=tmp_path, groq_api_key="test-key")
 
 
 @pytest.fixture
@@ -152,7 +152,7 @@ def test_failing_gig_does_not_stop_the_others(settings, monkeypatch):
 
 def test_job_is_failed_when_every_gig_fails(settings, monkeypatch):
     async def broken_generate(llm, scored_gig, settings_):
-        raise RuntimeError("Ollama Cloud rejected the API key")
+        raise RuntimeError("Groq rejected the API key")
 
     monkeypatch.setattr(jobs_module, "generate_proposal", broken_generate)
     save_shortlist(SHORTLIST, settings.output_dir)
@@ -452,8 +452,8 @@ def test_a_gig_dropped_from_the_shortlist_can_get_a_new_proposal(dropped, monkey
 
 def test_new_proposal_needs_an_api_key(settings):
     save_shortlist(SHORTLIST, settings.output_dir)
-    client = create_app(replace(settings, ollama_api_key="")).test_client()
+    client = create_app(replace(settings, groq_api_key="")).test_client()
     demo_id = make_demo_id(SHORTLIST[0].gig)
     page = client.post(f"/demos/{demo_id}/proposals", data={"csrf": csrf(client)}, follow_redirects=True)
-    assert "Set OLLAMA_API_KEY in .env" in page.get_data(as_text=True)
+    assert "Set GROQ_API_KEY in .env" in page.get_data(as_text=True)
     assert client.application.extensions["fdm_jobs"].recent() == []

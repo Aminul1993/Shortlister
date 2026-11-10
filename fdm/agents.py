@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from .llm import OllamaCloud, parse_json_object
+from .llm import GroqClient, parse_json_object
 from .models import Gig, Pitch
 
 PITCH_SYSTEM = """\
@@ -43,16 +43,6 @@ Reply with one JSON object:
 a fair market price for the scope if no budget is given
 - delivery_days: realistic calendar days to deliver the finished build
 """
-
-PITCH_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "message": {"type": "string"},
-        "bid_usd": {"type": "number"},
-        "delivery_days": {"type": "integer"},
-    },
-    "required": ["message", "bid_usd", "delivery_days"],
-}
 
 MIN_PITCH_CHARS = 150
 _PLACEHOLDER = re.compile(r"\[[^\]\n]*\b(?:your|name|client|insert|company)\b[^\]\n]*\]", re.I)
@@ -119,13 +109,14 @@ def _pitch_brief(gig: Gig, name: str, profile: str) -> str:
     return f"<freelancer>\n{freelancer}\n</freelancer>\n\nClient budget: {_budget(gig)}\n\n{_job_post(gig)}"
 
 
-async def run_pitch_writer(llm: OllamaCloud, gig: Gig, *, freelancer_name: str = "",
+async def run_pitch_writer(llm: GroqClient, gig: Gig, *, freelancer_name: str = "",
                            freelancer_profile: str = "") -> tuple[Pitch, str]:
     """Write the proposal for this gig. Returns (pitch, model used)."""
     messages = [
         {"role": "system", "content": PITCH_SYSTEM},
         {"role": "user", "content": _pitch_brief(gig, freelancer_name, freelancer_profile)},
     ]
-    pitch, model = await llm.complete(messages, parse=parse_pitch, json_schema=PITCH_SCHEMA, temperature=0.5)
+    # JSON mode works on every Groq chat model; PITCH_SYSTEM names the fields and parse_pitch checks them.
+    pitch, model = await llm.complete(messages, parse=parse_pitch, json_mode=True, temperature=0.5)
     pitch.bid_usd = fit_bid(pitch.bid_usd, gig)
     return pitch, model
